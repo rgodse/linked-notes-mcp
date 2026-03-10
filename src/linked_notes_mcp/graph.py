@@ -105,8 +105,12 @@ class KnowledgeGraph:
         self.notes[note.id] = note
         self.graph.add_node(note.id)
         
-        # Index by title
-        self._title_index[note.title.lower()] = note.id
+        # Index by title (keep-first semantics on collision)
+        title_key = note.title.lower()
+        if title_key in self._title_index:
+            print(f"Warning: title collision '{note.title}' — keeping '{self._title_index[title_key]}', ignoring '{note.id}'")
+        else:
+            self._title_index[title_key] = note.id
         
         # Index by tags
         for tag in note.tags:
@@ -219,7 +223,7 @@ class KnowledgeGraph:
             start_id=normalized,
             depth=depth,
             nodes=list(visited),
-            edges=edges
+            edges=list(dict.fromkeys(edges))  # deduplicate, preserve order
         )
     
     def find_path(
@@ -326,6 +330,22 @@ class KnowledgeGraph:
     def list_all_notes(self) -> list[Note]:
         """Get all notes in the graph."""
         return list(self.notes.values())
+
+    def list_stale_notes(self) -> list[Note]:
+        """Get notes whose 'expires' frontmatter date is in the past."""
+        from datetime import date
+        today = date.today()
+        stale = []
+        for note in self.notes.values():
+            raw = note.frontmatter.get("expires")
+            if not raw:
+                continue
+            try:
+                if date.fromisoformat(str(raw)) < today:
+                    stale.append(note)
+            except (ValueError, TypeError):
+                pass
+        return stale
 
     # ==================== Write Operations ====================
 

@@ -8,6 +8,8 @@ import argparse
 import asyncio
 import json
 import sys
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -66,6 +68,46 @@ def format_note_full(note: Note) -> dict[str, Any]:
             for link in note.outgoing_links
         ],
     }
+
+
+def _extract_excerpt(note: Note, query: str, max_chars: int = 175) -> str:
+    """Extract a relevant excerpt from a note's body around the query match."""
+    body = note.body
+    if not body:
+        return ""
+    idx = body.lower().find(query.lower())
+    if idx == -1:
+        raw = body[:max_chars]
+        excerpt = raw.strip()
+        if len(raw) == max_chars:
+            excerpt += "..."
+        return excerpt
+    half = max_chars // 2
+    start = max(0, idx - half)
+    end = min(len(body), start + max_chars)
+    start = max(0, end - max_chars)
+    raw = body[start:end].strip()
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(body) else ""
+    return prefix + raw + suffix
+
+
+def _followups_path() -> Path:
+    return Path(_graph.vault_path) / ".claude_followups.json"
+
+
+def _load_followups() -> list[dict]:
+    fp = _followups_path()
+    if not fp.exists():
+        return []
+    try:
+        return json.loads(fp.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_followups(followups: list[dict]) -> None:
+    _followups_path().write_text(json.dumps(followups, indent=2), encoding="utf-8")
 
 
 # Define tools
@@ -424,6 +466,93 @@ TOOLS = [
             "required": ["title", "context", "options", "decision", "reasoning"]
         }
     ),
+    # ==================== Claude-Perspective Tools ====================
+    Tool(
+        name="get_context",
+        description="Search notes and return excerpts with relevance info, plus any matching followup reminders. Use this at session start to bootstrap context on a topic.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Topic or keywords to build context around"
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Maximum number of notes to return"
+                }
+            },
+            "required": ["query"]
+        }
+    ),
+    Tool(
+        name="get_note_summary",
+        description="Get a note's metadata and a truncated body preview without loading the full content. Useful for deciding whether to load a note in full.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "identifier": {
+                    "type": "string",
+                    "description": "Note ID or title"
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "default": 500,
+                    "description": "Maximum characters to return from the body"
+                }
+            },
+            "required": ["identifier"]
+        }
+    ),
+    Tool(
+        name="list_stale_notes",
+        description="List notes whose 'expires' frontmatter date is in the past. Useful for identifying outdated information.",
+        inputSchema={
+            "type": "object",
+            "properties": {}
+        }
+    ),
+    Tool(
+        name="add_followup",
+        description="Add a persistent followup reminder to the vault. Reminders survive across sessions and can be retrieved with list_followups.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "Short topic label for the reminder"
+                },
+                "reminder": {
+                    "type": "string",
+                    "description": "The reminder text"
+                }
+            },
+            "required": ["topic", "reminder"]
+        }
+    ),
+    Tool(
+        name="list_followups",
+        description="List all persistent followup reminders stored in the vault.",
+        inputSchema={
+            "type": "object",
+            "properties": {}
+        }
+    ),
+    Tool(
+        name="dismiss_followup",
+        description="Dismiss (delete) a followup reminder by its ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Followup ID to dismiss"
+                }
+            },
+            "required": ["id"]
+        }
+    ),
 ]
 
 
@@ -455,9 +584,15 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
         return json.dumps(result, indent=2)
     
     elif name == "search":
+        query = arguments["query"]
         limit = arguments.get("limit", 20)
-        notes = graph.search(arguments["query"], limit)
-        return json.dumps([format_note_brief(n) for n in notes], indent=2)
+        notes = graph.search(query, limit)
+        results = []
+        for note in notes:
+            brief = format_note_brief(note)
+            brief["excerpt"] = _extract_excerpt(note, query)
+            results.append(brief)
+        return json.dumps(results, indent=2)
     
     elif name == "traverse":
         depth = min(arguments.get("depth", 2), 5)  # Cap at 5
@@ -651,6 +786,76 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
         except ValueError as e:
             return json.dumps({"error": str(e)})
 
+    elif name == "get_context":
+        query = arguments["query"]
+        limit = arguments.get("limit", 10)
+        notes = graph.search(query, limit)
+        followups = _load_followups()
+        query_lower = query.lower()
+        matching_followups = [
+            f for f in followups
+            if query_lower in f.get("topic", "").lower()
+            or query_lower in f.get("reminder", "").lower()
+        ]
+        context_notes = []
+        for note in notes:
+            brief = format_note_brief(note)
+            brief["excerpt"] = _extract_excerpt(note, query)
+            brief["relevance"] = 1
+            context_notes.append(brief)
+        return json.dumps({
+            "query": query,
+            "context_notes": context_notes,
+            "related_followups": matching_followups
+        }, indent=2)
+
+    elif name == "get_note_summary":
+        note = graph.get_note(arguments["identifier"])
+        if note is None:
+            return json.dumps({"error": f"Note not found: {arguments['identifier']}"})
+        max_chars = arguments.get("max_chars", 500)
+        body = note.body or ""
+        truncated = len(body) > max_chars
+        result = format_note_brief(note)
+        result["body_preview"] = body[:max_chars] + ("..." if truncated else "")
+        result["truncated"] = truncated
+        result["total_chars"] = len(body)
+        return json.dumps(result, indent=2)
+
+    elif name == "list_stale_notes":
+        notes = graph.list_stale_notes()
+        results = []
+        for note in notes:
+            brief = format_note_brief(note)
+            brief["expires"] = str(note.frontmatter.get("expires", ""))
+            results.append(brief)
+        return json.dumps(results, indent=2)
+
+    elif name == "add_followup":
+        followups = _load_followups()
+        entry = {
+            "id": str(uuid.uuid4()),
+            "topic": arguments["topic"],
+            "reminder": arguments["reminder"],
+            "created": datetime.now().isoformat()
+        }
+        followups.append(entry)
+        _save_followups(followups)
+        return json.dumps({"status": "success", "followup": entry}, indent=2)
+
+    elif name == "list_followups":
+        followups = _load_followups()
+        return json.dumps({"count": len(followups), "followups": followups}, indent=2)
+
+    elif name == "dismiss_followup":
+        followup_id = arguments["id"]
+        followups = _load_followups()
+        updated = [f for f in followups if f.get("id") != followup_id]
+        if len(updated) == len(followups):
+            return json.dumps({"error": f"Followup not found: {followup_id}"})
+        _save_followups(updated)
+        return json.dumps({"status": "success", "dismissed_id": followup_id})
+
     else:
         return json.dumps({"error": f"Unknown tool: {name}"})
 
@@ -696,12 +901,6 @@ def main():
         type=Path,
         help="Path to the markdown vault/folder"
     )
-    parser.add_argument(
-        "--watch",
-        action="store_true",
-        help="Watch for file changes and auto-rebuild (not yet implemented)"
-    )
-    
     args = parser.parse_args()
     
     if not args.vault_path.exists():

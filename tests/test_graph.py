@@ -288,3 +288,72 @@ class TestWriteOperations:
         links = graph.get_links("linker", "outgoing")
         assert "note-b" in links["outgoing"]
         assert "note-c" in links["outgoing"]
+
+
+class TestBugFixes:
+    """Tests for specific bug fixes."""
+
+    def test_title_collision_keeps_first(self, tmp_path, capsys):
+        """Title collision: first note wins, second is ignored with a warning."""
+        (tmp_path / "first.md").write_text("---\ntitle: Duplicate Title\n---\nFirst.")
+        (tmp_path / "second.md").write_text("---\ntitle: Duplicate Title\n---\nSecond.")
+
+        graph = KnowledgeGraph(tmp_path)
+
+        captured = capsys.readouterr()
+        assert "Warning: title collision" in captured.out
+
+        # Title lookup returns whichever was indexed first (one of the two)
+        note = graph.get_note("Duplicate Title")
+        assert note is not None
+        # The title index should map to exactly one note
+        assert graph._title_index["duplicate title"] in graph.notes
+
+    def test_traverse_no_duplicate_edges(self, sample_vault):
+        """Traverse result should not contain duplicate edges."""
+        graph = KnowledgeGraph(sample_vault)
+        result = graph.traverse("note-a", depth=2, direction="both")
+        # Convert edges to a list and check for uniqueness
+        edge_list = result.edges
+        edge_set = list(dict.fromkeys(edge_list))
+        assert len(edge_list) == len(edge_set), "Duplicate edges found in traverse result"
+
+
+class TestStaleNotes:
+    """Tests for list_stale_notes()."""
+
+    def test_expired_note_returned(self, tmp_path):
+        (tmp_path / "expired.md").write_text(
+            "---\ntitle: Expired Note\nexpires: 2020-01-01\n---\nOld content."
+        )
+        graph = KnowledgeGraph(tmp_path)
+        stale = graph.list_stale_notes()
+        ids = [n.id for n in stale]
+        assert "expired" in ids
+
+    def test_future_expiry_not_returned(self, tmp_path):
+        (tmp_path / "fresh.md").write_text(
+            "---\ntitle: Fresh Note\nexpires: 2099-01-01\n---\nStill valid."
+        )
+        graph = KnowledgeGraph(tmp_path)
+        stale = graph.list_stale_notes()
+        ids = [n.id for n in stale]
+        assert "fresh" not in ids
+
+    def test_malformed_date_skipped(self, tmp_path):
+        (tmp_path / "malformed.md").write_text(
+            "---\ntitle: Malformed Date\nexpires: not-a-date\n---\nContent."
+        )
+        graph = KnowledgeGraph(tmp_path)
+        # Should not raise; malformed date is silently skipped
+        stale = graph.list_stale_notes()
+        ids = [n.id for n in stale]
+        assert "malformed" not in ids
+
+    def test_no_expires_field_skipped(self, tmp_path):
+        (tmp_path / "noexpiry.md").write_text(
+            "---\ntitle: No Expiry\n---\nContent."
+        )
+        graph = KnowledgeGraph(tmp_path)
+        stale = graph.list_stale_notes()
+        assert stale == []

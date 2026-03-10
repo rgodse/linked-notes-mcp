@@ -84,14 +84,16 @@ Once configured, you can ask Claude things like:
 | Tool | Description |
 |------|-------------|
 | `get_note(identifier)` | Get full content of a note by ID or title |
+| `get_note_summary(identifier, max_chars)` | Get metadata + truncated body preview without loading full content |
 | `list_links(note_id, direction)` | Get outgoing/incoming/both links for a note |
-| `search(query, limit)` | Full-text search across all notes |
+| `search(query, limit)` | Full-text search — returns matching notes with inline excerpts |
 | `traverse(start_id, depth, direction)` | Get all connected notes within N hops |
 | `find_path(start_id, end_id)` | Find shortest path between two notes |
 | `list_tags()` | List all tags with counts |
 | `notes_by_tag(tag)` | Get all notes with a specific tag |
 | `graph_summary()` | Overview stats: total notes, links, orphans, most connected |
 | `list_notes(limit)` | List all notes (brief info) |
+| `list_stale_notes()` | List notes whose `expires` frontmatter date is in the past |
 | `rebuild()` | Refresh the index after file changes |
 
 ### Write Tools
@@ -112,6 +114,19 @@ Once configured, you can ask Claude things like:
 | `save_session_summary(...)` | Quick session summary with accomplishments, decisions, open items |
 | `save_decision(...)` | Record a decision with context, options, reasoning |
 
+### Claude-Perspective Tools
+
+These tools reduce friction when Claude is navigating the vault across sessions.
+
+| Tool | Description |
+|------|-------------|
+| `get_context(query, limit)` | Search notes + return excerpts with relevance info + matching followup reminders. Use at session start. |
+| `get_note_summary(identifier, max_chars)` | Cheap peek at a note before deciding whether to load it fully |
+| `list_stale_notes()` | Surface expired notes that may contain outdated information |
+| `add_followup(topic, reminder)` | Persist a reminder across sessions (stored in `.claude_followups.json`) |
+| `list_followups()` | List all pending followup reminders |
+| `dismiss_followup(id)` | Remove a followup reminder by its ID |
+
 ## Note Format
 
 linked-notes-mcp works with standard markdown files. It extracts:
@@ -125,10 +140,13 @@ tags:
   - project
   - planning
 custom_field: any value
+expires: 2025-12-31   # optional — mark note as expiring on this date
 ---
 ```
 
 If no title is in frontmatter, it uses the first `# Heading` or the filename.
+
+The `expires` field marks a note as time-limited. `list_stale_notes` returns all notes whose expiry date is in the past so you can review or archive them.
 
 ### Links
 
@@ -177,11 +195,26 @@ Claude: [creates note with title "Auth System Decisions", tags ["architecture", 
 
 You: "What did we decide about auth?"
 
-Claude: [searches notes, finds "Auth System Decisions", reads it]
+Claude: [calls get_context("auth"), gets excerpts + any followup reminders]
         "Based on my notes, you decided to use JWT tokens with..."
 ```
 
 Claude automatically adds `created` and `modified` timestamps, and can link new notes to existing ones using `[[wikilinks]]`.
+
+### Followup Reminders
+
+Claude can leave itself notes between sessions using the followup tools:
+
+```
+Claude: [end of session] add_followup(topic="auth", reminder="Check if refresh token rotation was implemented")
+
+--- next session ---
+
+Claude: [start of session] get_context("auth")
+        → returns matching notes AND the pending followup reminder
+```
+
+Reminders are stored in `.claude_followups.json` in the vault root (add this to `.gitignore` if desired).
 
 ## Development
 
@@ -223,7 +256,7 @@ Contributions welcome! Please open an issue or PR.
 
 ## Roadmap
 
-- [ ] File watching with auto-rebuild
 - [ ] Semantic search with embeddings (optional)
 - [ ] Export graph to various formats
 - [x] Note creation/editing tools
+- [x] Claude-perspective tools (get_context, followups, stale notes, note summaries)
