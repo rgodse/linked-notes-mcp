@@ -1,0 +1,715 @@
+"""
+MCP Server for linked-notes-mcp.
+
+Exposes tools for navigating markdown knowledge graphs via the Model Context Protocol.
+"""
+
+import argparse
+import asyncio
+import json
+import sys
+from pathlib import Path
+from typing import Any, Optional
+
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import TextContent, Tool
+
+from .graph import KnowledgeGraph, Note
+from .templates import (
+    list_templates as get_templates,
+    render_template,
+    create_session_summary,
+    create_decision_log,
+)
+
+
+# Global graph instance
+_graph: Optional[KnowledgeGraph] = None
+
+
+def get_graph() -> KnowledgeGraph:
+    """Get the global graph instance."""
+    if _graph is None:
+        raise RuntimeError("Graph not initialized. Call init_graph first.")
+    return _graph
+
+
+def init_graph(vault_path: Path) -> KnowledgeGraph:
+    """Initialize the global graph."""
+    global _graph
+    _graph = KnowledgeGraph(vault_path)
+    return _graph
+
+
+def format_note_brief(note: Note) -> dict[str, Any]:
+    """Format a note for brief display."""
+    return {
+        "id": note.id,
+        "title": note.title,
+        "tags": note.tags,
+        "path": str(note.path),
+    }
+
+
+def format_note_full(note: Note) -> dict[str, Any]:
+    """Format a note with full content."""
+    return {
+        "id": note.id,
+        "title": note.title,
+        "tags": note.tags,
+        "path": str(note.path),
+        "frontmatter": note.frontmatter,
+        "content": note.content,
+        "outgoing_links": [
+            {"target": link.target, "display": link.display_text, "type": link.link_type}
+            for link in note.outgoing_links
+        ],
+    }
+
+
+# Define tools
+TOOLS = [
+    Tool(
+        name="get_note",
+        description="Get the full content of a note by its ID or title. Returns the complete markdown content, frontmatter, tags, and outgoing links.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "identifier": {
+                    "type": "string",
+                    "description": "Note ID (filename without .md) or title"
+                }
+            },
+            "required": ["identifier"]
+        }
+    ),
+    Tool(
+        name="list_links",
+        description="Get the outgoing and/or incoming links for a note. Useful for understanding how a note connects to others in the knowledge graph.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "note_id": {
+                    "type": "string",
+                    "description": "Note ID or title"
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["outgoing", "incoming", "both"],
+                    "default": "both",
+                    "description": "Which links to return: outgoing (this note links to), incoming (link to this note), or both"
+                }
+            },
+            "required": ["note_id"]
+        }
+    ),
+    Tool(
+        name="search",
+        description="Full-text search across all notes. Searches titles, content, and tags. Returns matching notes sorted by relevance.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query"
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "description": "Maximum number of results to return"
+                }
+            },
+            "required": ["query"]
+        }
+    ),
+    Tool(
+        name="traverse",
+        description="Traverse the knowledge graph starting from a note, finding all connected notes within N hops. Useful for exploring related concepts and building context.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "start_id": {
+                    "type": "string",
+                    "description": "Starting note ID or title"
+                },
+                "depth": {
+                    "type": "integer",
+                    "default": 2,
+                    "minimum": 1,
+                    "maximum": 5,
+                    "description": "Maximum number of hops from the starting note"
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["outgoing", "incoming", "both"],
+                    "default": "both",
+                    "description": "Direction to traverse"
+                }
+            },
+            "required": ["start_id"]
+        }
+    ),
+    Tool(
+        name="find_path",
+        description="Find the shortest path between two notes in the knowledge graph. Useful for understanding how concepts connect.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "start_id": {
+                    "type": "string",
+                    "description": "Starting note ID or title"
+                },
+                "end_id": {
+                    "type": "string",
+                    "description": "Ending note ID or title"
+                }
+            },
+            "required": ["start_id", "end_id"]
+        }
+    ),
+    Tool(
+        name="list_tags",
+        description="List all tags used across notes, with counts. Useful for understanding the structure of the knowledge base.",
+        inputSchema={
+            "type": "object",
+            "properties": {}
+        }
+    ),
+    Tool(
+        name="notes_by_tag",
+        description="Get all notes with a specific tag.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "tag": {
+                    "type": "string",
+                    "description": "Tag to filter by"
+                }
+            },
+            "required": ["tag"]
+        }
+    ),
+    Tool(
+        name="graph_summary",
+        description="Get an overview of the knowledge graph: total notes, links, tags, orphan notes, and most connected notes. Useful for orientation.",
+        inputSchema={
+            "type": "object",
+            "properties": {}
+        }
+    ),
+    Tool(
+        name="list_notes",
+        description="List all notes in the knowledge base. Returns brief info (id, title, tags, path) for each note.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "default": 100,
+                    "description": "Maximum number of notes to return"
+                }
+            }
+        }
+    ),
+    Tool(
+        name="rebuild",
+        description="Rebuild the knowledge graph index. Use this after adding, editing, or deleting notes to refresh the graph.",
+        inputSchema={
+            "type": "object",
+            "properties": {}
+        }
+    ),
+    # ==================== Write Tools ====================
+    Tool(
+        name="create_note",
+        description="Create a new note in the vault. Use this to save insights, summaries, meeting notes, or any information worth remembering. The note will be automatically indexed and linked.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Title of the note"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Markdown content (without frontmatter). Use [[Note Name]] to link to other notes."
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags to categorize the note (e.g., ['project', 'meeting', 'idea'])"
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Optional filename (without .md). Defaults to normalized title."
+                }
+            },
+            "required": ["title", "content"]
+        }
+    ),
+    Tool(
+        name="update_note",
+        description="Update an existing note's content, title, or tags. Use this to refine or correct information.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "identifier": {
+                    "type": "string",
+                    "description": "Note ID or title to update"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "New markdown content (replaces existing body)"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "New title (optional)"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "New tags (replaces existing tags)"
+                }
+            },
+            "required": ["identifier"]
+        }
+    ),
+    Tool(
+        name="append_to_note",
+        description="Append content to an existing note. Useful for adding updates, follow-ups, or new sections without replacing existing content.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "identifier": {
+                    "type": "string",
+                    "description": "Note ID or title"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content to append (will be added with a blank line separator)"
+                }
+            },
+            "required": ["identifier", "content"]
+        }
+    ),
+    Tool(
+        name="delete_note",
+        description="Delete a note from the vault. Use with caution - this permanently removes the file.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "identifier": {
+                    "type": "string",
+                    "description": "Note ID or title to delete"
+                }
+            },
+            "required": ["identifier"]
+        }
+    ),
+    # ==================== Template Tools ====================
+    Tool(
+        name="list_templates",
+        description="List all available note templates. Templates provide consistent structure for common note types like session summaries, decisions, meetings, etc.",
+        inputSchema={
+            "type": "object",
+            "properties": {}
+        }
+    ),
+    Tool(
+        name="create_from_template",
+        description="Create a note using a predefined template. Use list_templates to see available templates.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "template": {
+                    "type": "string",
+                    "enum": ["session", "decision", "project", "meeting", "idea", "bug", "learning"],
+                    "description": "Template to use"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Note title (optional - will auto-generate if not provided)"
+                },
+                "fields": {
+                    "type": "object",
+                    "description": "Template fields to fill in (varies by template)"
+                },
+                "extra_tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Additional tags beyond template defaults"
+                }
+            },
+            "required": ["template", "fields"]
+        }
+    ),
+    Tool(
+        name="save_session_summary",
+        description="Save a summary at the end of a work session. Captures what was accomplished, decisions made, and what's next. USE THIS before ending significant conversations.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "Brief 1-2 sentence summary of the session"
+                },
+                "accomplished": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of things accomplished this session"
+                },
+                "decisions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Key decisions made (optional)"
+                },
+                "open_items": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Items still pending or blocked (optional)"
+                },
+                "next_session": {
+                    "type": "string",
+                    "description": "What to pick up next time (optional)"
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Project name for tagging (optional)"
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "Topic/focus of this session for the title (optional)"
+                }
+            },
+            "required": ["summary", "accomplished"]
+        }
+    ),
+    Tool(
+        name="save_decision",
+        description="Record an important decision with full context and reasoning. Use this when a significant choice is made so it can be referenced later.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Short title for the decision (e.g., 'JWT vs Sessions')"
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Background - why was this decision needed?"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Options that were considered"
+                },
+                "decision": {
+                    "type": "string",
+                    "description": "What was decided"
+                },
+                "reasoning": {
+                    "type": "string",
+                    "description": "Why this option was chosen"
+                },
+                "implications": {
+                    "type": "string",
+                    "description": "What this means going forward (optional)"
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Project name for tagging (optional)"
+                }
+            },
+            "required": ["title", "context", "options", "decision", "reasoning"]
+        }
+    ),
+]
+
+
+async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
+    """Handle a tool call and return the result as JSON."""
+    graph = get_graph()
+    
+    if name == "get_note":
+        note = graph.get_note(arguments["identifier"])
+        if note is None:
+            return json.dumps({"error": f"Note not found: {arguments['identifier']}"})
+        return json.dumps(format_note_full(note), indent=2)
+    
+    elif name == "list_links":
+        direction = arguments.get("direction", "both")
+        links = graph.get_links(arguments["note_id"], direction)
+        
+        # Enrich with titles
+        result = {}
+        for dir_name, link_ids in links.items():
+            result[dir_name] = []
+            for lid in link_ids:
+                note = graph.get_note(lid)
+                if note:
+                    result[dir_name].append({"id": lid, "title": note.title})
+                else:
+                    result[dir_name].append({"id": lid, "title": lid})
+        
+        return json.dumps(result, indent=2)
+    
+    elif name == "search":
+        limit = arguments.get("limit", 20)
+        notes = graph.search(arguments["query"], limit)
+        return json.dumps([format_note_brief(n) for n in notes], indent=2)
+    
+    elif name == "traverse":
+        depth = min(arguments.get("depth", 2), 5)  # Cap at 5
+        direction = arguments.get("direction", "both")
+        result = graph.traverse(arguments["start_id"], depth, direction)
+        
+        # Enrich nodes with titles
+        nodes_with_titles = []
+        for nid in result.nodes:
+            note = graph.get_note(nid)
+            if note:
+                nodes_with_titles.append({"id": nid, "title": note.title})
+            else:
+                nodes_with_titles.append({"id": nid, "title": nid})
+        
+        return json.dumps({
+            "start": result.start_id,
+            "depth": result.depth,
+            "nodes": nodes_with_titles,
+            "edges": [{"from": e[0], "to": e[1]} for e in result.edges],
+            "total_nodes": len(result.nodes)
+        }, indent=2)
+    
+    elif name == "find_path":
+        path = graph.find_path(arguments["start_id"], arguments["end_id"])
+        if path is None:
+            return json.dumps({"error": "No path found between the notes"})
+        
+        # Enrich with titles
+        path_with_titles = []
+        for nid in path:
+            note = graph.get_note(nid)
+            if note:
+                path_with_titles.append({"id": nid, "title": note.title})
+            else:
+                path_with_titles.append({"id": nid, "title": nid})
+        
+        return json.dumps({"path": path_with_titles, "length": len(path)}, indent=2)
+    
+    elif name == "list_tags":
+        tags = graph.list_tags()
+        return json.dumps([{"tag": t, "count": c} for t, c in tags], indent=2)
+    
+    elif name == "notes_by_tag":
+        notes = graph.notes_by_tag(arguments["tag"])
+        return json.dumps([format_note_brief(n) for n in notes], indent=2)
+    
+    elif name == "graph_summary":
+        stats = graph.get_stats()
+        
+        # Enrich most connected with titles
+        most_connected = []
+        for nid, count in stats.most_connected:
+            note = graph.get_note(nid)
+            title = note.title if note else nid
+            most_connected.append({"id": nid, "title": title, "connections": count})
+        
+        return json.dumps({
+            "total_notes": stats.total_notes,
+            "total_links": stats.total_links,
+            "total_tags": stats.total_tags,
+            "orphan_notes": stats.orphan_notes,
+            "most_connected": most_connected
+        }, indent=2)
+    
+    elif name == "list_notes":
+        limit = arguments.get("limit", 100)
+        notes = graph.list_all_notes()[:limit]
+        return json.dumps([format_note_brief(n) for n in notes], indent=2)
+    
+    elif name == "rebuild":
+        count = graph.rebuild()
+        return json.dumps({"status": "success", "notes_indexed": count})
+
+    # ==================== Write Tool Handlers ====================
+    elif name == "create_note":
+        try:
+            note = graph.create_note(
+                title=arguments["title"],
+                content=arguments["content"],
+                tags=arguments.get("tags"),
+                filename=arguments.get("filename")
+            )
+            return json.dumps({
+                "status": "success",
+                "message": f"Created note: {note.title}",
+                "note": format_note_brief(note)
+            }, indent=2)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    elif name == "update_note":
+        try:
+            note = graph.update_note(
+                identifier=arguments["identifier"],
+                content=arguments.get("content"),
+                title=arguments.get("title"),
+                tags=arguments.get("tags")
+            )
+            return json.dumps({
+                "status": "success",
+                "message": f"Updated note: {note.title}",
+                "note": format_note_brief(note)
+            }, indent=2)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    elif name == "append_to_note":
+        try:
+            note = graph.append_to_note(
+                identifier=arguments["identifier"],
+                content=arguments["content"]
+            )
+            return json.dumps({
+                "status": "success",
+                "message": f"Appended to note: {note.title}",
+                "note": format_note_brief(note)
+            }, indent=2)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    elif name == "delete_note":
+        deleted = graph.delete_note(arguments["identifier"])
+        if deleted:
+            return json.dumps({
+                "status": "success",
+                "message": f"Deleted note: {arguments['identifier']}"
+            })
+        else:
+            return json.dumps({"error": f"Note not found: {arguments['identifier']}"})
+
+    # ==================== Template Tool Handlers ====================
+    elif name == "list_templates":
+        templates = get_templates()
+        return json.dumps(templates, indent=2)
+
+    elif name == "create_from_template":
+        try:
+            title, content, tags = render_template(
+                template_name=arguments["template"],
+                fields=arguments.get("fields", {}),
+                title=arguments.get("title"),
+                extra_tags=arguments.get("extra_tags")
+            )
+            note = graph.create_note(title=title, content=content, tags=tags)
+            return json.dumps({
+                "status": "success",
+                "message": f"Created note from template: {note.title}",
+                "note": format_note_brief(note)
+            }, indent=2)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    elif name == "save_session_summary":
+        try:
+            title, content, tags = create_session_summary(
+                summary=arguments["summary"],
+                accomplished=arguments["accomplished"],
+                decisions=arguments.get("decisions"),
+                open_items=arguments.get("open_items"),
+                next_session=arguments.get("next_session"),
+                project_tag=arguments.get("project"),
+                topic=arguments.get("topic")
+            )
+            note = graph.create_note(title=title, content=content, tags=tags)
+            return json.dumps({
+                "status": "success",
+                "message": f"Saved session summary: {note.title}",
+                "note": format_note_brief(note)
+            }, indent=2)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    elif name == "save_decision":
+        try:
+            title, content, tags = create_decision_log(
+                decision_title=arguments["title"],
+                context=arguments["context"],
+                options=arguments["options"],
+                decision=arguments["decision"],
+                reasoning=arguments["reasoning"],
+                implications=arguments.get("implications"),
+                project_tag=arguments.get("project")
+            )
+            note = graph.create_note(title=title, content=content, tags=tags)
+            return json.dumps({
+                "status": "success",
+                "message": f"Saved decision: {note.title}",
+                "note": format_note_brief(note)
+            }, indent=2)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    else:
+        return json.dumps({"error": f"Unknown tool: {name}"})
+
+
+def create_server(vault_path: Path) -> Server:
+    """Create and configure the MCP server."""
+    server = Server("linked-notes-mcp")
+    
+    # Initialize the graph
+    init_graph(vault_path)
+    
+    @server.list_tools()
+    async def list_tools():
+        return TOOLS
+    
+    @server.call_tool()
+    async def call_tool(name: str, arguments: dict[str, Any]):
+        result = await handle_tool_call(name, arguments)
+        return [TextContent(type="text", text=result)]
+    
+    return server
+
+
+async def run_server(vault_path: Path):
+    """Run the MCP server."""
+    server = create_server(vault_path)
+    
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(
+            read_stream,
+            write_stream,
+            server.create_initialization_options()
+        )
+
+
+def main():
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="MCP server for markdown knowledge graphs"
+    )
+    parser.add_argument(
+        "vault_path",
+        type=Path,
+        help="Path to the markdown vault/folder"
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Watch for file changes and auto-rebuild (not yet implemented)"
+    )
+    
+    args = parser.parse_args()
+    
+    if not args.vault_path.exists():
+        print(f"Error: Vault path does not exist: {args.vault_path}", file=sys.stderr)
+        sys.exit(1)
+    
+    asyncio.run(run_server(args.vault_path))
+
+
+if __name__ == "__main__":
+    main()
