@@ -17,7 +17,14 @@ from typing import Any, Iterator, Optional
 import networkx as nx
 import yaml
 
-from .parser import Note, Relationship, is_markdown_file, normalize_id, parse_note
+from .parser import (
+    RELATIONSHIP_FIELDS,
+    Note,
+    Relationship,
+    is_markdown_file,
+    normalize_id,
+    parse_note,
+)
 
 
 @dataclass
@@ -587,6 +594,51 @@ class KnowledgeGraph:
             frontmatter.update(extra)
         return f"---\n{yaml.dump(frontmatter, default_flow_style=False)}---\n\n"
 
+    def _reload_note_from_disk(self, old_note: Note) -> Note:
+        """Re-parse a note from disk and refresh graph/index state."""
+
+        if old_note.id in self.notes:
+            del self.notes[old_note.id]
+        if old_note.id in self.graph:
+            self.graph.remove_node(old_note.id)
+        self._title_index = {
+            key: value for key, value in self._title_index.items() if value != old_note.id
+        }
+        self._alias_index = {
+            key: value for key, value in self._alias_index.items() if value != old_note.id
+        }
+        for tag in list(self._tag_index):
+            self._tag_index[tag].discard(old_note.id)
+            if not self._tag_index[tag]:
+                del self._tag_index[tag]
+
+        updated_note = parse_note(old_note.path)
+        self._add_note(updated_note)
+
+        for link in updated_note.outgoing_links:
+            if link.target in self.notes:
+                self._add_edge(
+                    updated_note.id,
+                    link.target,
+                    relationship_type=link.link_type,
+                    evidence="inline_link",
+                    display_text=link.display_text,
+                    line_number=link.line_number,
+                )
+
+        for relationship in updated_note.explicit_relationships:
+            target_id = self._resolve_relationship_target(relationship)
+            if target_id is not None:
+                self._add_edge(
+                    updated_note.id,
+                    target_id,
+                    relationship_type=relationship.relation_type,
+                    evidence="frontmatter",
+                    source_field=relationship.source_field,
+                )
+
+        return updated_note
+
     def create_note(
         self,
         title: str,
@@ -667,48 +719,148 @@ class KnowledgeGraph:
             f"---\n{yaml.dump(current_frontmatter, default_flow_style=False)}---\n\n{new_body}"
         )
         note.path.write_text(full_content, encoding="utf-8")
+        return self._reload_note_from_disk(note)
 
-        if note.id in self.notes:
-            del self.notes[note.id]
-        if note.id in self.graph:
-            self.graph.remove_node(note.id)
-        self._title_index = {
-            key: value for key, value in self._title_index.items() if value != note.id
-        }
-        self._alias_index = {
-            key: value for key, value in self._alias_index.items() if value != note.id
-        }
-        for tag in list(self._tag_index):
-            self._tag_index[tag].discard(note.id)
-            if not self._tag_index[tag]:
-                del self._tag_index[tag]
+    def upsert_memory_node(
+        self,
+        title: str,
+        summary: str,
+        entity_type: str,
+        project: Optional[str] = None,
+        status: Optional[str] = None,
+        aliases: Optional[list[str]] = None,
+        tags: Optional[list[str]] = None,
+        relationships: Optional[list[dict[str, str]]] = None,
+        body: Optional[str] = None,
+        filename: Optional[str] = None,
+    ) -> Note:
+        """Create or update a structured memory node optimized for agent retrieval."""
 
-        updated_note = parse_note(note.path)
-        self._add_note(updated_note)
+        identifier = filename or title
+        existing = self.get_note(identifier) or self.get_note(title)
 
-        for link in updated_note.outgoing_links:
-            if link.target in self.notes:
-                self._add_edge(
-                    updated_note.id,
-                    link.target,
-                    relationship_type=link.link_type,
-                    evidence="inline_link",
-                    display_text=link.display_text,
-                    line_number=link.line_number,
-                )
+        relationship_fields: dict[str, list[str]] = {}
+        for relationship in relationships or []:
+            relation_type = relationship["type"]
+            if relation_type not in RELATIONSHIP_FIELDS:
+                raise ValueError(f"Unsupported relationship type: {relation_type}")
+            relationship_fields.setdefault(relation_type, []).append(relationship["target"])
 
-        for relationship in updated_note.explicit_relationships:
-            target_id = self._resolve_relationship_target(relationship)
-            if target_id is not None:
-                self._add_edge(
-                    updated_note.id,
-                    target_id,
-                    relationship_type=relationship.relation_type,
-                    evidence="frontmatter",
-                    source_field=relationship.source_field,
-                )
+        if existing is None:
+            extra = {
+                "aliases": aliases or [],
+                "entity_type": entity_type,
+                "summary": summary,
+            }
+            if project:
+                extra["project"] = project
+            if status:
+                extra["status"] = status
+            extra.update(relationship_fields)
+            content_body = body if body is not None else summary
+            frontmatter = self._generate_frontmatter(title, [t.lower() for t in (tags or [])], extra)
+            file_path = Path(self.vault_path) / f"{normalize_id(filename or title)}.md"
+            file_path.write_text(frontmatter + content_body, encoding="utf-8")
+            note = parse_note(file_path)
+            self._add_note(note)
+            for link in note.outgoing_links:
+                if link.target in self.notes:
+                    self._add_edge(
+                        note.id,
+                        link.target,
+                        relationship_type=link.link_type,
+                        evidence="inline_link",
+                        display_text=link.display_text,
+                        line_number=link.line_number,
+                    )
+            for relationship in note.explicit_relationships:
+                target_id = self._resolve_relationship_target(relationship)
+                if target_id is not None:
+                    self._add_edge(
+                        note.id,
+                        target_id,
+                        relationship_type=relationship.relation_type,
+                        evidence="frontmatter",
+                        source_field=relationship.source_field,
+                    )
+            return note
 
-        return updated_note
+        frontmatter = existing.frontmatter.copy()
+        frontmatter["title"] = title
+        frontmatter["aliases"] = aliases or frontmatter.get("aliases", [])
+        frontmatter["entity_type"] = entity_type
+        frontmatter["summary"] = summary
+        if project is not None:
+            frontmatter["project"] = project
+        if status is not None:
+            frontmatter["status"] = status
+        if tags is not None:
+            frontmatter["tags"] = [tag.lower() for tag in tags]
+
+        for relation_type in RELATIONSHIP_FIELDS:
+            frontmatter.pop(relation_type, None)
+        frontmatter.update(relationship_fields)
+        frontmatter["modified"] = datetime.now().isoformat()
+
+        body_content = existing.body if body is None else body
+        existing.path.write_text(
+            f"---\n{yaml.dump(frontmatter, default_flow_style=False)}---\n\n{body_content}",
+            encoding="utf-8",
+        )
+        return self._reload_note_from_disk(existing)
+
+    def update_relationships(
+        self,
+        identifier: str,
+        add: Optional[list[dict[str, str]]] = None,
+        remove: Optional[list[dict[str, str]]] = None,
+        replace: Optional[list[dict[str, str]]] = None,
+    ) -> Note:
+        """Mutate a note's typed frontmatter relationships."""
+
+        note = self.get_note(identifier)
+        if not note:
+            raise ValueError(f"Note not found: {identifier}")
+
+        frontmatter = note.frontmatter.copy()
+        current: dict[str, list[str]] = {}
+        for relation_type in RELATIONSHIP_FIELDS:
+            value = frontmatter.get(relation_type)
+            if isinstance(value, str):
+                current[relation_type] = [value]
+            elif isinstance(value, list):
+                current[relation_type] = [str(item) for item in value]
+
+        if replace is not None:
+            current = {}
+            add = replace
+            remove = None
+
+        for relationship in add or []:
+            relation_type = relationship["type"]
+            if relation_type not in RELATIONSHIP_FIELDS:
+                raise ValueError(f"Unsupported relationship type: {relation_type}")
+            current.setdefault(relation_type, [])
+            if relationship["target"] not in current[relation_type]:
+                current[relation_type].append(relationship["target"])
+
+        for relationship in remove or []:
+            relation_type = relationship["type"]
+            if relation_type in current and relationship["target"] in current[relation_type]:
+                current[relation_type].remove(relationship["target"])
+
+        for relation_type in RELATIONSHIP_FIELDS:
+            frontmatter.pop(relation_type, None)
+        for relation_type, targets in current.items():
+            if targets:
+                frontmatter[relation_type] = targets
+
+        frontmatter["modified"] = datetime.now().isoformat()
+        note.path.write_text(
+            f"---\n{yaml.dump(frontmatter, default_flow_style=False)}---\n\n{note.body}",
+            encoding="utf-8",
+        )
+        return self._reload_note_from_disk(note)
 
     def append_to_note(self, identifier: str, content: str) -> Note:
         """Append content to an existing note."""

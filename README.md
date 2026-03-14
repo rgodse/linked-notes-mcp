@@ -196,6 +196,8 @@ The body should still exist, but treat it as supporting detail. The frontmatter 
 
 | Tool | What it is good for |
 |------|----------------------|
+| `upsert_memory_node(...)` | Create or update a structured memory node with agent-friendly frontmatter |
+| `update_relationships(identifier, add?, remove?, replace?)` | Edit graph relationships without rewriting note bodies |
 | `create_note(title, content, tags?, filename?)` | Create new notes |
 | `update_note(identifier, content?, title?, tags?)` | Replace note content or metadata |
 | `append_to_note(identifier, content)` | Add updates without replacing the whole note |
@@ -216,8 +218,9 @@ Followups are stored in `.linked_notes_followups.json` in the vault root. Add th
 ### During work
 
 1. Update notes with new links and frontmatter relationships
-2. Save decisions explicitly
-3. Add followups for anything that should survive the session
+2. Prefer `upsert_memory_node` and `update_relationships` for durable graph memory objects
+3. Save decisions explicitly
+4. Add followups for anything that should survive the session
 
 ### Session end
 

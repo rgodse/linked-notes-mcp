@@ -141,6 +141,50 @@ class TestGraphTools:
         assert any(node["id"] == "beta" for node in result["nodes"])
 
 
+class TestStructuredMemoryTools:
+    @pytest.mark.asyncio
+    async def test_upsert_memory_node(self, vault):
+        result = json.loads(
+            await handle_tool_call(
+                "upsert_memory_node",
+                {
+                    "title": "Gateway Memory",
+                    "summary": "Primary gateway node",
+                    "entity_type": "service",
+                    "aliases": ["Gateway"],
+                    "project": "graph-memory",
+                    "status": "active",
+                    "relationships": [{"type": "depends_on", "target": "Beta Note"}],
+                },
+            )
+        )
+        assert result["status"] == "success"
+        assert result["note"]["aliases"] == ["Gateway"]
+        assert result["note"]["frontmatter"]["entity_type"] == "service"
+
+    @pytest.mark.asyncio
+    async def test_update_relationships(self, vault):
+        await handle_tool_call(
+            "upsert_memory_node",
+            {
+                "title": "Gateway Memory",
+                "summary": "Primary gateway node",
+                "entity_type": "service",
+            },
+        )
+        result = json.loads(
+            await handle_tool_call(
+                "update_relationships",
+                {
+                    "identifier": "Gateway Memory",
+                    "add": [{"type": "depends_on", "target": "Beta Note"}],
+                },
+            )
+        )
+        assert result["status"] == "success"
+        assert result["note"]["frontmatter"]["depends_on"] == ["Beta Note"]
+
+
 # ---------------------------------------------------------------------------
 # get_note_summary
 # ---------------------------------------------------------------------------

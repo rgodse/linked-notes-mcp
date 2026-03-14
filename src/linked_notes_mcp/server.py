@@ -423,6 +423,81 @@ TOOLS = [
             "required": ["identifier"]
         }
     ),
+    Tool(
+        name="upsert_memory_node",
+        description="Create or update a structured memory node optimized for agent retrieval. Use this for project, service, decision, issue, or session nodes where frontmatter should carry the important facts.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Canonical note title"},
+                "summary": {"type": "string", "description": "Short machine-friendly summary"},
+                "entity_type": {"type": "string", "description": "Type like project, service, decision, issue, or session"},
+                "project": {"type": "string", "description": "Associated project or workstream"},
+                "status": {"type": "string", "description": "Status like active, blocked, done, draft, or stale"},
+                "aliases": {"type": "array", "items": {"type": "string"}, "description": "Alternative lookup names"},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for the note"},
+                "relationships": {
+                    "type": "array",
+                    "description": "Typed relationships to other notes",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "target": {"type": "string"},
+                        },
+                        "required": ["type", "target"],
+                    },
+                },
+                "body": {"type": "string", "description": "Optional supporting body content"},
+                "filename": {"type": "string", "description": "Optional filename override"},
+            },
+            "required": ["title", "summary", "entity_type"]
+        }
+    ),
+    Tool(
+        name="update_relationships",
+        description="Add, remove, or replace typed frontmatter relationships for a note without rewriting the whole note body.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "identifier": {"type": "string", "description": "Note ID or title"},
+                "add": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "target": {"type": "string"},
+                        },
+                        "required": ["type", "target"],
+                    },
+                },
+                "remove": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "target": {"type": "string"},
+                        },
+                        "required": ["type", "target"],
+                    },
+                },
+                "replace": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "target": {"type": "string"},
+                        },
+                        "required": ["type", "target"],
+                    },
+                },
+            },
+            "required": ["identifier"]
+        }
+    ),
     # ==================== Template Tools ====================
     Tool(
         name="list_templates",
@@ -855,6 +930,44 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             })
         else:
             return json.dumps({"error": f"Note not found: {arguments['identifier']}"})
+
+    elif name == "upsert_memory_node":
+        try:
+            note = graph.upsert_memory_node(
+                title=arguments["title"],
+                summary=arguments["summary"],
+                entity_type=arguments["entity_type"],
+                project=arguments.get("project"),
+                status=arguments.get("status"),
+                aliases=arguments.get("aliases"),
+                tags=arguments.get("tags"),
+                relationships=arguments.get("relationships"),
+                body=arguments.get("body"),
+                filename=arguments.get("filename"),
+            )
+            return json.dumps({
+                "status": "success",
+                "message": f"Upserted memory node: {note.title}",
+                "note": format_note_full(note)
+            }, indent=2)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    elif name == "update_relationships":
+        try:
+            note = graph.update_relationships(
+                identifier=arguments["identifier"],
+                add=arguments.get("add"),
+                remove=arguments.get("remove"),
+                replace=arguments.get("replace"),
+            )
+            return json.dumps({
+                "status": "success",
+                "message": f"Updated relationships for: {note.title}",
+                "note": format_note_full(note)
+            }, indent=2)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
 
     # ==================== Template Tool Handlers ====================
     elif name == "list_templates":

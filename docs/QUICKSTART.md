@@ -69,6 +69,8 @@ Then create the related notes it points to.
 
 Try these prompts:
 
+- "Upsert a memory node for API Gateway with service metadata"
+- "Add a depends_on relationship from API Gateway to Auth Service"
 - "Get context on API Gateway"
 - "List relationships for API Gateway"
 - "Show graph context around API Gateway"

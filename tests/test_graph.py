@@ -312,6 +312,64 @@ class TestWriteOperations:
         result = graph.delete_note("nonexistent")
         assert result is False
 
+    def test_upsert_memory_node_create(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        note = graph.upsert_memory_node(
+            title="Gateway Memory",
+            summary="Primary API gateway node",
+            entity_type="service",
+            project="graph-memory",
+            status="active",
+            aliases=["Gateway"],
+            relationships=[{"type": "depends_on", "target": "Note B"}],
+        )
+
+        assert note.frontmatter["entity_type"] == "service"
+        assert note.frontmatter["summary"] == "Primary API gateway node"
+        assert note.aliases == ["Gateway"]
+        relationships = graph.get_relationships("Gateway Memory", "outgoing")
+        assert any(item["type"] == "depends_on" for item in relationships["outgoing"])
+
+    def test_upsert_memory_node_update(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        graph.upsert_memory_node(
+            title="Gateway Memory",
+            summary="Primary API gateway node",
+            entity_type="service",
+        )
+
+        updated = graph.upsert_memory_node(
+            title="Gateway Memory",
+            summary="Updated summary",
+            entity_type="service",
+            status="blocked",
+            aliases=["Gateway"],
+        )
+
+        assert updated.frontmatter["summary"] == "Updated summary"
+        assert updated.frontmatter["status"] == "blocked"
+        assert updated.aliases == ["Gateway"]
+
+    def test_update_relationships_add_remove(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        graph.upsert_memory_node(
+            title="Gateway Memory",
+            summary="Primary API gateway node",
+            entity_type="service",
+        )
+
+        note = graph.update_relationships(
+            "Gateway Memory",
+            add=[{"type": "depends_on", "target": "Note B"}],
+        )
+        assert note.frontmatter["depends_on"] == ["Note B"]
+
+        note = graph.update_relationships(
+            "Gateway Memory",
+            remove=[{"type": "depends_on", "target": "Note B"}],
+        )
+        assert "depends_on" not in note.frontmatter
+
     def test_create_note_links_indexed(self, sample_vault):
         """Verify that links in newly created notes are indexed."""
         graph = KnowledgeGraph(sample_vault)
