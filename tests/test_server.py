@@ -143,6 +143,21 @@ class TestGraphTools:
 
 class TestStructuredMemoryTools:
     @pytest.mark.asyncio
+    async def test_create_note_returns_template_guidance(self, vault):
+        result = json.loads(
+            await handle_tool_call(
+                "create_note",
+                {
+                    "title": "Loose Scratchpad",
+                    "content": "Unstructured note body.",
+                },
+            )
+        )
+        assert result["status"] == "success"
+        assert "guidance" in result
+        assert "create_from_template" in result["guidance"]
+
+    @pytest.mark.asyncio
     async def test_upsert_memory_node(self, vault):
         result = json.loads(
             await handle_tool_call(
@@ -161,6 +176,8 @@ class TestStructuredMemoryTools:
         assert result["status"] == "success"
         assert result["note"]["aliases"] == ["Gateway"]
         assert result["note"]["frontmatter"]["entity_type"] == "service"
+        assert "guidance" in result
+        assert "structured frontmatter" in result["guidance"]
 
     @pytest.mark.asyncio
     async def test_update_relationships(self, vault):
@@ -359,6 +376,31 @@ class TestGetNoteSummary:
             "identifier": "nonexistent-note-xyz"
         }))
         assert "error" in result
+
+
+class TestTemplateTools:
+    @pytest.mark.asyncio
+    async def test_create_from_template_returns_guidance(self, vault):
+        result = json.loads(
+            await handle_tool_call(
+                "create_from_template",
+                {
+                    "template": "project",
+                    "title": "Project Context - Test",
+                    "fields": {
+                        "overview": "Overview text",
+                        "goals": "Goal text",
+                        "status": "Active",
+                        "stakeholders": "Team",
+                        "links": "None",
+                        "notes": "Notes",
+                    },
+                },
+            )
+        )
+        assert result["status"] == "success"
+        assert "guidance" in result
+        assert "Template-based note created" in result["guidance"]
 
 
 # ---------------------------------------------------------------------------

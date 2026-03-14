@@ -3,11 +3,31 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-`linked-notes-mcp` is a graph-first local memory system for AI agents built on MCP. It stores memory as structured markdown nodes plus typed relationships, so agents can retrieve, update, review, and maintain knowledge as an explicit graph instead of relying only on opaque vector memory.
+`linked-notes-mcp` is a graph-first local memory system for AI agents built on MCP. It gives assistants a writable markdown knowledge graph they can inspect, update, review, and maintain over time instead of pushing project memory into opaque chat history or vector stores.
+
+The core idea is simple: agent memory should be local, editable, and structurally explicit. Notes live on disk as markdown. Links and frontmatter become graph edges. Retrieval can use both text and graph structure. Humans can inspect the result at any time.
 
 It is designed for agent-authored memory first: notes are optimized for retrieval, review, and long-term maintenance using frontmatter fields like `entity_type`, `summary`, `status`, `importance`, `confidence`, and `last_reviewed`.
 
-The model is domain-agnostic and works for technical and non-technical work alike: projects, services, issues, stakeholders, meetings, research, initiatives, and workstreams.
+The model is domain-agnostic and works for technical and non-technical work alike: projects, repositories, services, issues, stakeholders, meetings, research, initiatives, and workstreams.
+
+## Why This Exists
+
+Most AI memory ends up in one of three forms:
+
+- chat transcripts that are hard to reuse
+- vector memory that is hard to inspect
+- plain notes with weak structural context
+
+`linked-notes-mcp` is for the case where you want memory to be:
+
+- local and portable
+- readable and editable without proprietary tooling
+- graph-shaped instead of flat
+- durable across sessions and across different MCP clients
+- maintainable by both humans and agents
+
+This makes it a good fit for open source use. The value is not monetization or hosted infrastructure. The value is having a shared memory graph that stays under your control.
 
 ## Why Graph Memory
 
@@ -65,6 +85,19 @@ Why these fields matter:
 - write tools for persistent agent memory
 - Obsidian-compatible markdown folders
 
+## Selling Point
+
+The selling point is not "an MCP for notes."
+
+The selling point is: `linked-notes-mcp` gives agents a shared markdown memory graph that humans can inspect, edit, and improve over time.
+
+That matters because it means:
+
+- project context survives beyond one chat
+- decisions and dependencies become explicit instead of implied
+- memory can be reviewed and cleaned up with dashboard and lint tools
+- the same vault can be used across Claude, Codex, and other MCP clients
+
 ## Installation
 
 The package is not published to PyPI yet. Use one of these install paths instead.
@@ -81,8 +114,10 @@ uvx --from git+https://github.com/rgodse/linked-notes-mcp linked-notes-mcp /path
 git clone https://github.com/rgodse/linked-notes-mcp
 cd linked-notes-mcp
 uv sync
-uv run linked-notes-mcp /path/to/your/notes
+uv run python scripts/run_linked_notes_mcp.py /path/to/your/notes
 ```
+
+The launcher script imports from `src/` directly, which keeps local-clone MCP setups working even if an environment's editable install support is unreliable.
 
 ## Codex Configuration
 
@@ -105,7 +140,7 @@ rmcp_client = true
 
 [mcp_servers.linked_notes]
 command = "uv"
-args = ["run", "--directory", "/absolute/path/to/linked-notes-mcp", "linked-notes-mcp", "/path/to/your/notes"]
+args = ["run", "--directory", "/absolute/path/to/linked-notes-mcp", "python", "scripts/run_linked_notes_mcp.py", "/path/to/your/notes"]
 ```
 
 Restart Codex after updating the config.
@@ -199,6 +234,7 @@ The body should still exist, but treat it as supporting detail. The frontmatter 
 
 | Tool | What it is good for |
 |------|----------------------|
+| `create_from_template(template, fields, ...)` | Start new notes from a consistent shape instead of inventing structure each time |
 | `upsert_memory_node(...)` | Create or update a structured memory node with agent-friendly frontmatter |
 | `update_relationships(identifier, add?, remove?, replace?)` | Edit graph relationships without rewriting note bodies |
 | `create_note(title, content, tags?, filename?)` | Create new notes |
@@ -240,6 +276,26 @@ Templates now cover both technical and non-technical work:
 - `idea`
 - `learning`
 
+## Template-First Workflow
+
+The best experience with this MCP is template-first, not free-form note creation.
+
+Recommended pattern:
+
+1. Start with `list_templates()` when entering a new domain or workflow.
+2. Use `create_from_template(...)` for the first version of a note whenever possible.
+3. Use `upsert_memory_node(...)` when you need stronger machine-friendly frontmatter or want to refine an existing note.
+4. Use `promote_to_memory_node(...)` for messy raw output that should become structured memory after the fact.
+
+In practice:
+
+- use `repo_project` for codebases and repositories
+- use `service` for systems and components
+- use `issue` for bugs and blockers
+- use `decision` for architectural choices
+- use `session` for end-of-session summaries
+- use `research`, `initiative`, `workstream`, and `stakeholder` for broader operating context
+
 Followups are stored in `.linked_notes_followups.json` in the vault root. Add that file to `.gitignore` if you do not want reminders committed.
 
 ## Suggested Workflow
@@ -254,7 +310,7 @@ Followups are stored in `.linked_notes_followups.json` in the vault root. Add th
 ### During work
 
 1. Update notes with new links and frontmatter relationships
-2. Prefer `upsert_memory_node` and `update_relationships` for durable graph memory objects
+2. Prefer `create_from_template` for new notes, then refine with `upsert_memory_node` and `update_relationships`
 3. Save decisions explicitly
 4. Add followups for anything that should survive the session
 5. Use `promote_to_memory_node` when you have raw notes or messy outputs that should become structured memory
@@ -285,7 +341,7 @@ git clone https://github.com/rgodse/linked-notes-mcp
 cd linked-notes-mcp
 uv sync --dev
 uv run pytest
-uv run linked-notes-mcp /path/to/test/vault
+uv run python scripts/run_linked_notes_mcp.py /path/to/test/vault
 ```
 
 ## Comparison with Memory Styles

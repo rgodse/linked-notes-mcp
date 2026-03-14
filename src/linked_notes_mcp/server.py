@@ -59,6 +59,28 @@ def format_note_brief(note: Note) -> dict[str, Any]:
     }
 
 
+def _template_guidance(note: Optional[Note] = None) -> str:
+    """Return a soft nudge toward template-first note creation."""
+
+    if note is None:
+        return (
+            "Prefer `create_from_template(...)` for new notes. Start with `list_templates()` "
+            "and choose a shape like `repo_project`, `service`, `issue`, `decision`, or `session`."
+        )
+
+    if not note.frontmatter.get("entity_type") or not note.frontmatter.get("summary"):
+        return (
+            "This note was created free-form. For stronger retrieval and graph maintenance, "
+            "prefer `create_from_template(...)` for new notes or refine this one with "
+            "`upsert_memory_node(...)` so it has structured frontmatter like `entity_type` and `summary`."
+        )
+
+    return (
+        "This note already has structured frontmatter. For future notes, prefer "
+        "`create_from_template(...)` so new memory starts in a consistent shape."
+    )
+
+
 def format_note_full(note: Note) -> dict[str, Any]:
     """Format a note with full content."""
     return {
@@ -407,7 +429,7 @@ TOOLS = [
     # ==================== Write Tools ====================
     Tool(
         name="create_note",
-        description="Create a new note in the vault. Use this to save insights, summaries, meeting notes, or any information worth remembering. The note will be automatically indexed and linked.",
+        description="Create a new note in the vault. This is a fallback for free-form notes when no template fits. For most new notes, call `list_templates` first and prefer `create_from_template` so memory starts with a consistent, graph-friendly shape. The note will be automatically indexed and linked.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -417,7 +439,7 @@ TOOLS = [
                 },
                 "content": {
                     "type": "string",
-                    "description": "Markdown content (without frontmatter). Use [[Note Name]] to link to other notes."
+                    "description": "Markdown content (without frontmatter). Use [[Note Name]] to link to other notes. Prefer `create_from_template` instead when a template fits the note type."
                 },
                 "tags": {
                     "type": "array",
@@ -493,7 +515,7 @@ TOOLS = [
     ),
     Tool(
         name="upsert_memory_node",
-        description="Create or update a structured memory node optimized for agent retrieval. Use this for project, service, decision, issue, or session nodes where frontmatter should carry the important facts.",
+        description="Create or update a structured memory node optimized for agent retrieval. For a brand new note, prefer `list_templates` plus `create_from_template` first, then use this tool to refine or normalize machine-friendly frontmatter such as `entity_type`, `summary`, `status`, and typed relationships.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -711,7 +733,7 @@ TOOLS = [
     # ==================== Template Tools ====================
     Tool(
         name="list_templates",
-        description="List all available note templates. Templates provide consistent structure for common note types like session summaries, decisions, meetings, etc.",
+        description="List all available note templates. Call this first when creating a new note. Templates are the preferred starting point because they provide consistent structure for repo projects, services, issues, decisions, meetings, sessions, and other graph-friendly memory types.",
         inputSchema={
             "type": "object",
             "properties": {}
@@ -719,7 +741,7 @@ TOOLS = [
     ),
     Tool(
         name="create_from_template",
-        description="Create a note using a predefined template. Use list_templates to see available templates.",
+        description="Create a note using a predefined template. This is the preferred way to start a new note because templates provide a consistent shape for graph-friendly memory and improve downstream retrieval, review, and maintenance.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -1096,7 +1118,8 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             return json.dumps({
                 "status": "success",
                 "message": f"Created note: {note.title}",
-                "note": format_note_brief(note)
+                "note": format_note_brief(note),
+                "guidance": _template_guidance(note),
             }, indent=2)
         except ValueError as e:
             return json.dumps({"error": str(e)})
@@ -1158,7 +1181,8 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             return json.dumps({
                 "status": "success",
                 "message": f"Upserted memory node: {note.title}",
-                "note": format_note_full(note)
+                "note": format_note_full(note),
+                "guidance": _template_guidance(note),
             }, indent=2)
         except ValueError as e:
             return json.dumps({"error": str(e)})
@@ -1425,7 +1449,8 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             return json.dumps({
                 "status": "success",
                 "message": f"Created note from template: {note.title}",
-                "note": format_note_brief(note)
+                "note": format_note_brief(note),
+                "guidance": "Template-based note created. Prefer this flow for new notes so memory stays consistent and graph-friendly.",
             }, indent=2)
         except ValueError as e:
             return json.dumps({"error": str(e)})

@@ -10,6 +10,8 @@ cd linked-notes-mcp
 uv sync
 ```
 
+For local clones, use the checked-in launcher script instead of the generated console entrypoint. It imports from `src/` directly and avoids editable-install issues in some environments.
+
 ## 2. Create a Memory Folder
 
 ```bash
@@ -40,7 +42,7 @@ rmcp_client = true
 
 [mcp_servers.brain]
 command = "uv"
-args = ["run", "--directory", "/absolute/path/to/linked-notes-mcp", "linked-notes-mcp", "/Users/YOUR_USERNAME/agent-brain"]
+args = ["run", "--directory", "/absolute/path/to/linked-notes-mcp", "python", "scripts/run_linked_notes_mcp.py", "/Users/YOUR_USERNAME/agent-brain"]
 ```
 
 Restart Codex.
