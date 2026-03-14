@@ -10,6 +10,8 @@ from linked_notes_mcp.templates import (
     render_template,
     create_session_summary,
     create_decision_log,
+    create_repo_memory,
+    create_workstream_memory,
 )
 
 
@@ -95,6 +97,20 @@ class TestRenderTemplate:
         with pytest.raises(ValueError, match="Template not found"):
             render_template("nonexistent", {})
 
+    def test_render_initiative_template(self):
+        title, content, tags = render_template(
+            template_name="initiative",
+            fields={
+                "summary": "Improve internal operations",
+                "outcomes": ["Reduce turnaround", "Clarify ownership"],
+            },
+            title="Ops Initiative"
+        )
+
+        assert title == "Ops Initiative"
+        assert "Improve internal operations" in content
+        assert "initiative" in tags
+
 
 class TestSessionSummary:
     def test_basic_session_summary(self):
@@ -175,3 +191,29 @@ class TestDecisionLog:
         )
 
         assert "Need to train on AWS services" in content
+
+
+class TestMemoryHelpers:
+    def test_create_repo_memory(self):
+        title, content, tags = create_repo_memory(
+            repo_name="linked-notes-mcp",
+            summary="Graph memory MCP server",
+            stack=["Python", "MCP"],
+            areas=["retrieval", "graph maintenance"]
+        )
+
+        assert title == "Project: linked-notes-mcp"
+        assert "Graph memory MCP server" in content
+        assert "project-linked-notes-mcp" in tags
+
+    def test_create_workstream_memory(self):
+        title, content, tags = create_workstream_memory(
+            name="Quarterly Planning",
+            summary="Coordinate planning across teams",
+            owners=["Ops", "Product"],
+            dependencies=["Budget approval"]
+        )
+
+        assert title == "Workstream: Quarterly Planning"
+        assert "Coordinate planning across teams" in content
+        assert "workstream-quarterly-planning" in tags

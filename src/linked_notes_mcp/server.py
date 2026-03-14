@@ -146,6 +146,17 @@ def _suggestion_key(source_id: str, target_id: str, suggested_type: str) -> str:
     return f"{source_id}|{target_id}|{suggested_type}"
 
 
+def _review_confidence(review: dict, suggestion_score: int) -> float:
+    """Estimate suggestion confidence from score and review history."""
+
+    accepted = int(review.get("accepted_count", 0))
+    rejected = int(review.get("rejected_count", 0))
+    base = min(0.95, 0.25 + suggestion_score * 0.08)
+    adjustment = accepted * 0.07 - rejected * 0.08
+    confidence = max(0.0, min(0.99, base + adjustment))
+    return round(confidence, 2)
+
+
 # Define tools
 TOOLS = [
     Tool(
@@ -1164,12 +1175,14 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             review = reviews.get(key, {"state": "pending"})
             if state != "all" and review.get("state", "pending") != state:
                 continue
+            confidence = _review_confidence(review, suggestion.score)
             result.append(
                 {
                     "source_id": suggestion.source_id,
                     "target_id": suggestion.target_id,
                     "suggested_type": suggestion.suggested_type,
                     "score": suggestion.score,
+                    "confidence": confidence,
                     "reasons": suggestion.reasons,
                     "review": review,
                 }
@@ -1186,8 +1199,11 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
         )
         reviews = _load_reviews()
         key = _suggestion_key(source_id, target_id, suggested_type)
+        prior = reviews.get(key, {})
         reviews[key] = {
             "state": "accepted",
+            "accepted_count": int(prior.get("accepted_count", 0)) + 1,
+            "rejected_count": int(prior.get("rejected_count", 0)),
             "updated_at": datetime.now().isoformat(),
         }
         _save_reviews(reviews)
@@ -1203,8 +1219,11 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
         suggested_type = arguments["suggested_type"]
         reviews = _load_reviews()
         key = _suggestion_key(source_id, target_id, suggested_type)
+        prior = reviews.get(key, {})
         reviews[key] = {
             "state": "rejected",
+            "accepted_count": int(prior.get("accepted_count", 0)),
+            "rejected_count": int(prior.get("rejected_count", 0)) + 1,
             "reason": arguments.get("reason"),
             "updated_at": datetime.now().isoformat(),
         }

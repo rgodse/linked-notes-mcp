@@ -79,3 +79,5 @@ Run maintenance regularly:
 - accept or reject suggested relationships
 - merge duplicate nodes
 - review stale but important notes
+
+Treat suggestions as reviewable memory candidates, not automatic truth. Over time the review history becomes a lightweight confidence signal.

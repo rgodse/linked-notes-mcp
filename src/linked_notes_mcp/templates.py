@@ -10,6 +10,149 @@ from typing import Optional
 
 # Template definitions
 TEMPLATES = {
+    "initiative": {
+        "name": "Initiative",
+        "description": "Cross-functional initiative memory with goals, outcomes, and risks",
+        "default_tags": ["initiative"],
+        "structure": """## Summary
+{summary}
+
+## Desired Outcomes
+{outcomes}
+
+## Current Status
+{status}
+
+## Risks
+{risks}
+
+## Next Moves
+{next_moves}
+"""
+    },
+    "workstream": {
+        "name": "Workstream",
+        "description": "Ongoing stream of work within a larger program or initiative",
+        "default_tags": ["workstream"],
+        "structure": """## Summary
+{summary}
+
+## Scope
+{scope}
+
+## Owners
+{owners}
+
+## Dependencies
+{dependencies}
+
+## Open Questions
+{open_questions}
+"""
+    },
+    "stakeholder": {
+        "name": "Stakeholder",
+        "description": "Memory node for a person, team, or stakeholder relationship",
+        "default_tags": ["stakeholder"],
+        "structure": """## Summary
+{summary}
+
+## Role
+{role}
+
+## Interests
+{interests}
+
+## Concerns
+{concerns}
+
+## Working Notes
+{notes}
+"""
+    },
+    "research": {
+        "name": "Research Note",
+        "description": "Structured research memory with question, findings, evidence, and next steps",
+        "default_tags": ["research"],
+        "structure": """## Question
+{question}
+
+## Summary
+{summary}
+
+## Findings
+{findings}
+
+## Evidence
+{evidence}
+
+## Next Steps
+{next_steps}
+"""
+    },
+    "repo_project": {
+        "name": "Repo Project",
+        "description": "Project memory node for a software repository with goals, stack, and active concerns",
+        "default_tags": ["project", "repo"],
+        "structure": """## Summary
+{summary}
+
+## Repository
+{repository}
+
+## Stack
+{stack}
+
+## Key Areas
+{areas}
+
+## Active Concerns
+{concerns}
+
+## Notes
+{notes}
+"""
+    },
+    "service": {
+        "name": "Service Node",
+        "description": "Structured memory node for a service or subsystem",
+        "default_tags": ["service"],
+        "structure": """## Summary
+{summary}
+
+## Responsibilities
+{responsibilities}
+
+## Interfaces
+{interfaces}
+
+## Dependencies
+{dependencies}
+
+## Risks
+{risks}
+"""
+    },
+    "issue": {
+        "name": "Issue Node",
+        "description": "Structured issue memory for bugs, incidents, or blockers",
+        "default_tags": ["issue"],
+        "structure": """## Summary
+{summary}
+
+## Symptoms
+{symptoms}
+
+## Impact
+{impact}
+
+## Suspected Cause
+{suspected_cause}
+
+## Next Actions
+{next_actions}
+"""
+    },
     "session": {
         "name": "Session Summary",
         "description": "End-of-session summary capturing accomplishments, decisions, and next steps",
@@ -305,4 +448,47 @@ def create_decision_log(
     if project_tag:
         tags.append(f"project-{project_tag.lower()}")
 
+    return title, content, tags
+
+
+def create_repo_memory(
+    repo_name: str,
+    summary: str,
+    stack: list[str],
+    areas: list[str],
+    concerns: Optional[list[str]] = None,
+) -> tuple[str, str, list[str]]:
+    """Create a repo-oriented project memory note."""
+
+    title = f"Project: {repo_name}"
+    content = TEMPLATES["repo_project"]["structure"].format(
+        summary=summary,
+        repository=repo_name,
+        stack="\n".join(f"- {item}" for item in stack) if stack else "- _TBD_",
+        areas="\n".join(f"- {item}" for item in areas) if areas else "- _TBD_",
+        concerns="\n".join(f"- {item}" for item in (concerns or [])) if concerns else "- _None_",
+        notes="_TBD_",
+    )
+    tags = ["project", "repo", f"project-{repo_name.lower().replace(' ', '-')}"]
+    return title, content, tags
+
+
+def create_workstream_memory(
+    name: str,
+    summary: str,
+    owners: list[str],
+    dependencies: Optional[list[str]] = None,
+    open_questions: Optional[list[str]] = None,
+) -> tuple[str, str, list[str]]:
+    """Create a non-technical workstream memory note."""
+
+    title = f"Workstream: {name}"
+    content = TEMPLATES["workstream"]["structure"].format(
+        summary=summary,
+        scope="_TBD_",
+        owners="\n".join(f"- {item}" for item in owners) if owners else "- _TBD_",
+        dependencies="\n".join(f"- {item}" for item in (dependencies or [])) if dependencies else "- _None_",
+        open_questions="\n".join(f"- {item}" for item in (open_questions or [])) if open_questions else "- _None_",
+    )
+    tags = ["workstream", f"workstream-{name.lower().replace(' ', '-')}"]
     return title, content, tags

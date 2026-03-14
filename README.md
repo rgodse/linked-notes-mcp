@@ -7,6 +7,8 @@ Graph-first MCP memory for markdown notes. Point it at a folder of markdown file
 
 This vault is meant to be authored primarily for the agent, not for a human reader. Human readability is still useful, but structured frontmatter and explicit relationships should win over prose.
 
+The memory model is domain-agnostic. It can be used for coding work, strategy, operations, research, stakeholders, meetings, and cross-functional programs, not just software repos.
+
 ## Why Graph Memory
 
 This repo is optimized for explicit memory:
@@ -218,6 +220,24 @@ The body should still exist, but treat it as supporting detail. The frontmatter 
 | `accept_relationship_suggestion(...)` | Apply a reviewed relationship suggestion |
 | `reject_relationship_suggestion(...)` | Record a rejected suggestion so it stops resurfacing |
 
+### Template Coverage
+
+Templates now cover both technical and non-technical work:
+
+- `repo_project`
+- `service`
+- `issue`
+- `initiative`
+- `workstream`
+- `stakeholder`
+- `research`
+- `project`
+- `meeting`
+- `decision`
+- `session`
+- `idea`
+- `learning`
+
 Followups are stored in `.linked_notes_followups.json` in the vault root. Add that file to `.gitignore` if you do not want reminders committed.
 
 ## Suggested Workflow
@@ -251,6 +271,8 @@ Run this periodically:
 4. accept or reject good suggestions
 5. `merge_memory_nodes(...)` for duplicates
 6. refresh `last_reviewed`, `importance`, and `confidence`
+
+Accepted and rejected suggestions are tracked over time, and review confidence is surfaced alongside future suggestions.
 
 ## Development
 

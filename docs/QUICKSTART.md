@@ -25,6 +25,11 @@ Build the notes for the agent first:
 - add `importance`, `confidence`, and `last_reviewed` for ranking and quality checks
 - use the body for supporting detail, not the primary retrieval key
 
+Use whichever template family matches the work:
+
+- technical: repo project, service, issue
+- operating/business: initiative, workstream, stakeholder, research, meeting
+
 ## 3. Configure Codex
 
 Edit `~/.codex/config.toml`:
@@ -76,6 +81,7 @@ Try these prompts:
 - "Score memory health and show me the weakest notes"
 - "Suggest missing relationships"
 - "Review pending relationship suggestions"
+- "Show me suggestions with confidence and review state"
 - "Get context on API Gateway"
 - "List relationships for API Gateway"
 - "Show graph context around API Gateway"
