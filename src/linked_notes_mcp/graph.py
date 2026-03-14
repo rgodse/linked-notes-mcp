@@ -52,6 +52,7 @@ class KnowledgeGraph:
         self.notes: dict[str, Note] = {}
         self._tag_index: dict[str, set[str]] = {}
         self._title_index: dict[str, str] = {}
+        self._alias_index: dict[str, str] = {}
 
         if vault_path:
             self.rebuild()
@@ -69,6 +70,7 @@ class KnowledgeGraph:
         self.notes.clear()
         self._tag_index.clear()
         self._title_index.clear()
+        self._alias_index.clear()
 
         vault = Path(self.vault_path)
         if not vault.exists():
@@ -124,6 +126,8 @@ class KnowledgeGraph:
         lower_id = identifier.lower()
         if lower_id in self._title_index:
             return self._title_index[lower_id]
+        if lower_id in self._alias_index:
+            return self._alias_index[lower_id]
         return None
 
     def _add_note(self, note: Note) -> None:
@@ -140,6 +144,11 @@ class KnowledgeGraph:
             )
         else:
             self._title_index[title_key] = note.id
+
+        for alias in note.aliases:
+            alias_key = alias.lower()
+            if alias_key not in self._alias_index:
+                self._alias_index[alias_key] = note.id
 
         for tag in note.tags:
             self._tag_index.setdefault(tag, set()).add(note.id)
@@ -357,9 +366,27 @@ class KnowledgeGraph:
             score = 0
             if query_lower in note.title.lower():
                 score += 10
+            for alias in note.aliases:
+                alias_lower = alias.lower()
+                if query_lower == alias_lower:
+                    score += 9
+                elif query_lower in alias_lower:
+                    score += 6
             for tag in note.tags:
                 if query_lower in tag:
                     score += 5
+            summary = str(note.frontmatter.get("summary", "")).lower()
+            if query_lower in summary:
+                score += 6
+            project = str(note.frontmatter.get("project", "")).lower()
+            if query_lower in project:
+                score += 5
+            note_type = str(note.frontmatter.get("entity_type", "")).lower()
+            if query_lower in note_type:
+                score += 4
+            status = str(note.frontmatter.get("status", "")).lower()
+            if query_lower in status:
+                score += 3
             for relationship in note.explicit_relationships:
                 if query_lower in relationship.relation_type:
                     score += 4
@@ -648,6 +675,9 @@ class KnowledgeGraph:
         self._title_index = {
             key: value for key, value in self._title_index.items() if value != note.id
         }
+        self._alias_index = {
+            key: value for key, value in self._alias_index.items() if value != note.id
+        }
         for tag in list(self._tag_index):
             self._tag_index[tag].discard(note.id)
             if not self._tag_index[tag]:
@@ -701,6 +731,10 @@ class KnowledgeGraph:
         title_lower = note.title.lower()
         if title_lower in self._title_index:
             del self._title_index[title_lower]
+        for alias in note.aliases:
+            alias_lower = alias.lower()
+            if alias_lower in self._alias_index:
+                del self._alias_index[alias_lower]
 
         for tag in note.tags:
             if tag in self._tag_index:

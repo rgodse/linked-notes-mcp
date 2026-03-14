@@ -18,6 +18,12 @@ mkdir ~/agent-brain
 
 This folder is your graph memory. Notes are nodes. Links and frontmatter relationships are edges.
 
+Build the notes for the agent first:
+
+- keep frontmatter structured
+- use `aliases`, `entity_type`, `project`, `status`, and `summary`
+- use the body for supporting detail, not the primary retrieval key
+
 ## 3. Configure Codex
 
 Edit `~/.codex/config.toml`:
@@ -41,6 +47,11 @@ Create a note like this:
 ---
 title: API Gateway
 tags: [architecture, backend]
+aliases: [Gateway]
+entity_type: service
+project: graph-memory
+status: active
+summary: Request entry point that coordinates auth and downstream services.
 depends_on:
   - Auth Service
 related_to:

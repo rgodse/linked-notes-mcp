@@ -49,8 +49,13 @@ def format_note_brief(note: Note) -> dict[str, Any]:
     return {
         "id": note.id,
         "title": note.title,
+        "aliases": note.aliases,
         "tags": note.tags,
         "path": str(note.path),
+        "entity_type": note.frontmatter.get("entity_type"),
+        "project": note.frontmatter.get("project"),
+        "status": note.frontmatter.get("status"),
+        "summary": note.frontmatter.get("summary"),
     }
 
 
@@ -59,6 +64,7 @@ def format_note_full(note: Note) -> dict[str, Any]:
     return {
         "id": note.id,
         "title": note.title,
+        "aliases": note.aliases,
         "tags": note.tags,
         "path": str(note.path),
         "frontmatter": note.frontmatter,

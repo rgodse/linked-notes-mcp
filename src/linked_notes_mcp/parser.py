@@ -61,6 +61,7 @@ class Note:
     content: str
     frontmatter: dict = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)
+    aliases: list[str] = field(default_factory=list)
     outgoing_links: list[Link] = field(default_factory=list)
     explicit_relationships: list[Relationship] = field(default_factory=list)
 
@@ -171,6 +172,20 @@ def extract_tags(frontmatter: dict) -> list[str]:
     return [t.lower() for t in tags if t]
 
 
+def extract_aliases(frontmatter: dict) -> list[str]:
+    """Extract aliases from frontmatter."""
+
+    aliases = frontmatter.get("aliases", [])
+    if isinstance(aliases, str):
+        aliases = [alias.strip() for alias in aliases.split(",")]
+    elif isinstance(aliases, list):
+        aliases = [str(alias).strip() for alias in aliases]
+    else:
+        aliases = []
+
+    return [alias for alias in aliases if alias]
+
+
 def extract_relationships(frontmatter: dict) -> list[Relationship]:
     """Extract typed graph relationships from frontmatter."""
 
@@ -209,6 +224,7 @@ def parse_note(path: Path) -> Note:
     note_id = normalize_id(path.stem)
     title = extract_title(content, frontmatter, path.stem)
     tags = extract_tags(frontmatter)
+    aliases = extract_aliases(frontmatter)
     wikilinks = extract_wikilinks(content)
     md_links = extract_markdown_links(content)
     relationships = extract_relationships(frontmatter)
@@ -220,6 +236,7 @@ def parse_note(path: Path) -> Note:
         content=content,
         frontmatter=frontmatter,
         tags=tags,
+        aliases=aliases,
         outgoing_links=wikilinks + md_links,
         explicit_relationships=relationships,
     )

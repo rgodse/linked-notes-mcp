@@ -7,6 +7,7 @@ import pytest
 
 from linked_notes_mcp.parser import (
     Link,
+    extract_aliases,
     extract_relationships,
     extract_markdown_links,
     extract_tags,
@@ -133,6 +134,16 @@ class TestExtractTags:
         assert tags == []
 
 
+class TestExtractAliases:
+    def test_list_aliases(self):
+        aliases = extract_aliases({"aliases": ["API Gateway", "Gateway"]})
+        assert aliases == ["API Gateway", "Gateway"]
+
+    def test_string_aliases(self):
+        aliases = extract_aliases({"aliases": "API Gateway, Gateway"})
+        assert aliases == ["API Gateway", "Gateway"]
+
+
 class TestExtractRelationships:
     def test_string_relationship(self):
         relationships = extract_relationships({"depends_on": "Auth Service"})
@@ -156,6 +167,8 @@ class TestParseNote:
 title: Test Note
 tags:
   - testing
+aliases:
+  - Example Alias
 depends_on:
   - Another Note
 related_to: Third
@@ -172,5 +185,6 @@ Also see [markdown link](other.md).
             assert note.id == "test-note"
             assert note.title == "Test Note"
             assert note.tags == ["testing"]
+            assert note.aliases == ["Example Alias"]
             assert len(note.outgoing_links) == 3
             assert len(note.explicit_relationships) == 2

@@ -18,6 +18,11 @@ def sample_vault():
         (vault / "note-a.md").write_text("""---
 title: Note A
 tags: [alpha]
+aliases: [Primary Note A]
+entity_type: project
+project: graph-memory
+status: active
+summary: Central project anchor note
 depends_on: [Note B]
 related_to: [Note C]
 ---
@@ -76,6 +81,12 @@ class TestKnowledgeGraph:
         note = graph.get_note("Note B")
         assert note is not None
         assert note.id == "note-b"
+
+    def test_get_note_by_alias(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        note = graph.get_note("Primary Note A")
+        assert note is not None
+        assert note.id == "note-a"
     
     def test_get_links_outgoing(self, sample_vault):
         graph = KnowledgeGraph(sample_vault)
@@ -139,6 +150,12 @@ class TestKnowledgeGraph:
         graph = KnowledgeGraph(sample_vault)
         results = graph.search("Note A")
         assert len(results) > 0
+        assert results[0].id == "note-a"
+
+    def test_search_prefers_alias_and_structured_fields(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        results = graph.search("graph-memory")
+        assert results
         assert results[0].id == "note-a"
     
     def test_list_tags(self, sample_vault):

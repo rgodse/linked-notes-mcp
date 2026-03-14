@@ -5,6 +5,8 @@
 
 Graph-first MCP memory for markdown notes. Point it at a folder of markdown files and an MCP client like Codex or Claude can search, traverse, and update a real knowledge graph instead of relying on opaque vector memory.
 
+This vault is meant to be authored primarily for the agent, not for a human reader. Human readability is still useful, but structured frontmatter and explicit relationships should win over prose.
+
 ## Why Graph Memory
 
 This repo is optimized for explicit memory:
@@ -20,6 +22,34 @@ That makes memory:
 - deterministic
 - easy to edit by hand
 - better suited to project context, dependencies, decisions, and followups
+
+## Agent-First Note Shape
+
+Prefer notes with machine-friendly frontmatter like this:
+
+```yaml
+---
+title: API Gateway
+aliases:
+  - Gateway
+entity_type: service
+project: graph-memory
+status: active
+summary: Entry point for requests and coordinator for auth and downstream services.
+depends_on:
+  - Auth Service
+related_to:
+  - User Service
+---
+```
+
+Why these fields matter:
+
+- `aliases` makes lookup more forgiving
+- `entity_type` helps agents separate projects, services, decisions, and sessions
+- `project` lets retrieval group notes by workstream
+- `status` helps distinguish active vs stale memory
+- `summary` gives a short retrieval target that is better than scraping prose from the body
 
 ## Features
 
@@ -138,6 +168,8 @@ Supported relationship fields:
 - `decided_by`
 - `supersedes`
 - `superseded_by`
+
+The body should still exist, but treat it as supporting detail. The frontmatter should carry the retrieval-critical facts.
 
 ## High-Value Tools
 

@@ -25,6 +25,14 @@ Important project notes should use frontmatter relationships such as:
 
 This is what makes graph retrieval stronger than plain text retrieval.
 
+Also keep these frontmatter fields current:
+
+- `aliases`
+- `entity_type`
+- `project`
+- `status`
+- `summary`
+
 ### 3. Save decisions as graph objects
 
 Important choices should become notes with links and relationship fields, not only paragraphs buried in a session log.
