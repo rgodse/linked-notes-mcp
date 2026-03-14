@@ -1,6 +1,6 @@
-# Quick Start: Persistent MCP Notes
+# Quick Start: Graph Memory for MCP Clients
 
-Get an MCP client remembering things across sessions in 5 minutes.
+Get Codex or another MCP client using graph-first memory in a few minutes.
 
 ## 1. Clone and Install
 
@@ -10,17 +10,15 @@ cd linked-notes-mcp
 uv sync
 ```
 
-## 2. Create a Brain Folder
+## 2. Create a Memory Folder
 
 ```bash
 mkdir ~/agent-brain
 ```
 
-This is where your MCP client will read and write notes.
+This folder is your graph memory. Notes are nodes. Links and frontmatter relationships are edges.
 
-## 3. Configure Codex or Claude Desktop
-
-### Codex
+## 3. Configure Codex
 
 Edit `~/.codex/config.toml`:
 
@@ -35,81 +33,57 @@ args = ["run", "--directory", "/absolute/path/to/linked-notes-mcp", "linked-note
 
 Restart Codex.
 
-### Claude Desktop
+## 4. Create a First Structured Note
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Create a note like this:
 
-```json
-{
-  "mcpServers": {
-    "brain": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "/absolute/path/to/linked-notes-mcp",
-        "linked-notes-mcp",
-        "/Users/YOUR_USERNAME/agent-brain"
-      ]
-    }
-  }
-}
+```md
+---
+title: API Gateway
+tags: [architecture, backend]
+depends_on:
+  - Auth Service
+related_to:
+  - User Service
+---
+
+# API Gateway
+
+Routes requests and coordinates auth + downstream services.
 ```
 
-Restart Claude Desktop.
+Then create the related notes it points to.
 
-## 4. Test It
+## 5. Use the Graph Tools
 
-Open your MCP client and say:
+Try these prompts:
 
-> "Create a note called 'First Note' with content 'Hello from my brain!' and tag it with 'test'"
+- "Get context on API Gateway"
+- "List relationships for API Gateway"
+- "Show graph context around API Gateway"
+- "Find the path between API Gateway and User Service"
 
-Then:
+## 6. Add Session Memory Habits
 
-> "Search your notes for 'hello'"
+Use these habits consistently:
 
-The client should find the note it just created.
-
-## 5. Add Memory Instructions
-
-Add to your client instructions:
-
-```text
-You have access to a notes vault via the "brain" MCP. Use it to:
-
-1. Start of session: search for relevant context before diving in.
-2. During work: reference past decisions and progress.
-3. End of session: use save_session_summary to capture progress.
-
-Key tools:
-- save_session_summary
-- save_decision
-- search
-- list_templates
-```
-
-## Suggested Tags
-
-| Tag | Use For |
-|-----|---------|
-| `#decision` | Architectural/design decisions with reasoning |
-| `#todo` | Open tasks and next steps |
-| `#session` | Session summaries |
-| `#context` | Background info the agent should remember |
-| `#project-x` | Project-specific notes |
-| `#blocked` | Things waiting on external input |
-| `#idea` | Ideas to explore later |
+1. Start with `get_context` or `get_graph_context`
+2. Save decisions when you make them
+3. Add followups for unresolved work
+4. End with `save_session_summary`
 
 ## Troubleshooting
 
-**Client doesn't see the MCP:**
-- Restart the client after config changes
-- Check the path in config matches your actual folder
+**Client doesn't see the MCP**
+- restart the client
+- check the configured repo path
+- check the configured notes path
 
-**Notes not persisting:**
-- Verify the folder exists and is writable
-- Check the client logs for errors
+**Graph feels weak**
+- add explicit frontmatter relationships
+- add more wikilinks between related notes
+- use consistent note titles and tags
 
-**Can't find notes that exist:**
-- Run `rebuild()` to refresh the index
-- Check if the note has the expected tags/content
+**A relationship did not resolve**
+- make sure the target note exists
+- prefer exact note titles in frontmatter relationship lists

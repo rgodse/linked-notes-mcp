@@ -18,6 +18,8 @@ def sample_vault():
         (vault / "note-a.md").write_text("""---
 title: Note A
 tags: [alpha]
+depends_on: [Note B]
+related_to: [Note C]
 ---
 # Note A
 Links to [[Note B]] and [[Note C]].
@@ -34,6 +36,7 @@ Links back to [[Note A]].
         (vault / "note-c.md").write_text("""---
 title: Note C
 tags: [alpha, gamma]
+blocks: [Note D]
 ---
 # Note C
 Links to [[Note D]].
@@ -84,6 +87,13 @@ class TestKnowledgeGraph:
         graph = KnowledgeGraph(sample_vault)
         links = graph.get_links("note-b", "incoming")
         assert "note-a" in links["incoming"]
+
+    def test_get_relationships_outgoing(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        relationships = graph.get_relationships("note-a", "outgoing")
+        relation_types = {item["type"] for item in relationships["outgoing"]}
+        assert "depends_on" in relation_types
+        assert "related_to" in relation_types
     
     def test_traverse_depth_1(self, sample_vault):
         graph = KnowledgeGraph(sample_vault)
@@ -98,6 +108,12 @@ class TestKnowledgeGraph:
         graph = KnowledgeGraph(sample_vault)
         result = graph.traverse("note-a", depth=2)
         assert "note-d" in result.nodes
+
+    def test_traverse_filtered_by_relationship(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        result = graph.traverse("note-a", depth=1, relation_types=["depends_on"])
+        assert "note-b" in result.nodes
+        assert "note-c" not in result.nodes
     
     def test_find_path(self, sample_vault):
         graph = KnowledgeGraph(sample_vault)
@@ -106,6 +122,13 @@ class TestKnowledgeGraph:
         assert path[0] == "note-a"
         assert path[-1] == "note-d"
         assert len(path) == 3  # A -> C -> D
+
+    def test_get_path_details(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        path = graph.get_path_details("note-a", "note-d")
+        assert path is not None
+        assert path[0]["id"] == "note-a"
+        assert "to_next" in path[0]
     
     def test_find_path_no_connection(self, sample_vault):
         graph = KnowledgeGraph(sample_vault)
@@ -138,6 +161,8 @@ class TestKnowledgeGraph:
         assert stats.total_notes == 5
         assert stats.orphan_notes == 1  # orphan.md
         assert stats.total_links > 0
+        assert stats.total_relationships >= 3
+        assert any(rel_type == "depends_on" for rel_type, _ in stats.relationship_counts)
     
     def test_rebuild(self, sample_vault):
         graph = KnowledgeGraph(sample_vault)
@@ -288,6 +313,13 @@ class TestWriteOperations:
         links = graph.get_links("linker", "outgoing")
         assert "note-b" in links["outgoing"]
         assert "note-c" in links["outgoing"]
+
+    def test_graph_context(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        context = graph.graph_context("note-a", depth=2, limit=5)
+        assert context["anchor"] == "note-a"
+        assert any(node["id"] == "note-b" for node in context["nodes"])
+        assert any(edge["relationships"] for edge in context["edges"])
 
 
 class TestBugFixes:

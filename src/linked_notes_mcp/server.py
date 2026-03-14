@@ -67,6 +67,14 @@ def format_note_full(note: Note) -> dict[str, Any]:
             {"target": link.target, "display": link.display_text, "type": link.link_type}
             for link in note.outgoing_links
         ],
+        "explicit_relationships": [
+            {
+                "target": relationship.target,
+                "type": relationship.relation_type,
+                "source_field": relationship.source_field,
+            }
+            for relationship in note.explicit_relationships
+        ],
     }
 
 
@@ -187,6 +195,11 @@ TOOLS = [
                     "enum": ["outgoing", "incoming", "both"],
                     "default": "both",
                     "description": "Direction to traverse"
+                },
+                "relation_types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional relationship types to keep during traversal, for example depends_on, blocks, or related_to"
                 }
             },
             "required": ["start_id"]
@@ -208,6 +221,61 @@ TOOLS = [
                 }
             },
             "required": ["start_id", "end_id"]
+        }
+    ),
+    Tool(
+        name="list_relationships",
+        description="List typed graph relationships for a note, including frontmatter relationships and inline link edges. Use this when you want explicit memory edges instead of raw note search.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "identifier": {
+                    "type": "string",
+                    "description": "Note ID or title"
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["outgoing", "incoming", "both"],
+                    "default": "both",
+                    "description": "Which direction of relationships to inspect"
+                },
+                "relation_type": {
+                    "type": "string",
+                    "description": "Optional relationship type filter"
+                }
+            },
+            "required": ["identifier"]
+        }
+    ),
+    Tool(
+        name="get_graph_context",
+        description="Get graph-first context around a note. This expands nearby nodes and edges, scores them by distance and relationship density, and is more useful than raw note search when your memory is structured as a graph.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "identifier": {
+                    "type": "string",
+                    "description": "Anchor note ID or title"
+                },
+                "depth": {
+                    "type": "integer",
+                    "default": 2,
+                    "minimum": 1,
+                    "maximum": 5,
+                    "description": "Maximum graph distance from the anchor note"
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 12,
+                    "description": "Maximum number of related nodes to return"
+                },
+                "relation_types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional relationship types to prioritize or restrict"
+                }
+            },
+            "required": ["identifier"]
         }
     ),
     Tool(
@@ -466,10 +534,10 @@ TOOLS = [
             "required": ["title", "context", "options", "decision", "reasoning"]
         }
     ),
-    # ==================== Claude-Perspective Tools ====================
+    # ==================== Agent Memory Tools ====================
     Tool(
         name="get_context",
-        description="Search notes and return excerpts with relevance info, plus any matching followup reminders. Use this at session start to bootstrap context on a topic.",
+        description="Search notes and return excerpts with relevance info, plus any matching followup reminders and graph-local context. Use this at session start to bootstrap context on a topic.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -481,6 +549,18 @@ TOOLS = [
                     "type": "integer",
                     "default": 10,
                     "description": "Maximum number of notes to return"
+                },
+                "graph_depth": {
+                    "type": "integer",
+                    "default": 2,
+                    "minimum": 1,
+                    "maximum": 5,
+                    "description": "How far to expand from the best matching note in the graph"
+                },
+                "graph_limit": {
+                    "type": "integer",
+                    "default": 8,
+                    "description": "Maximum number of graph-neighbor notes to include"
                 }
             },
             "required": ["query"]
@@ -597,7 +677,8 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
     elif name == "traverse":
         depth = min(arguments.get("depth", 2), 5)  # Cap at 5
         direction = arguments.get("direction", "both")
-        result = graph.traverse(arguments["start_id"], depth, direction)
+        relation_types = arguments.get("relation_types")
+        result = graph.traverse(arguments["start_id"], depth, direction, relation_types)
         
         # Enrich nodes with titles
         nodes_with_titles = []
@@ -620,17 +701,57 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
         path = graph.find_path(arguments["start_id"], arguments["end_id"])
         if path is None:
             return json.dumps({"error": "No path found between the notes"})
-        
-        # Enrich with titles
+
+        detailed_path = graph.get_path_details(arguments["start_id"], arguments["end_id"]) or []
         path_with_titles = []
-        for nid in path:
-            note = graph.get_note(nid)
-            if note:
-                path_with_titles.append({"id": nid, "title": note.title})
-            else:
-                path_with_titles.append({"id": nid, "title": nid})
-        
+        for step in detailed_path:
+            note = graph.get_note(step["id"])
+            entry = {
+                "id": step["id"],
+                "title": note.title if note else step["id"],
+            }
+            if "to_next" in step:
+                entry["to_next"] = step["to_next"]
+            path_with_titles.append(entry)
+
         return json.dumps({"path": path_with_titles, "length": len(path)}, indent=2)
+
+    elif name == "list_relationships":
+        direction = arguments.get("direction", "both")
+        relation_type = arguments.get("relation_type")
+        relationships = graph.get_relationships(arguments["identifier"], direction, relation_type)
+
+        enriched = {}
+        for bucket, items in relationships.items():
+            enriched[bucket] = []
+            for item in items:
+                source_note = graph.get_note(item["from"])
+                target_note = graph.get_note(item["to"])
+                enriched[bucket].append(
+                    {
+                        **item,
+                        "from_title": source_note.title if source_note else item["from"],
+                        "to_title": target_note.title if target_note else item["to"],
+                    }
+                )
+
+        return json.dumps(enriched, indent=2)
+
+    elif name == "get_graph_context":
+        depth = min(arguments.get("depth", 2), 5)
+        limit = arguments.get("limit", 12)
+        relation_types = arguments.get("relation_types")
+        context = graph.graph_context(
+            arguments["identifier"],
+            depth=depth,
+            relation_types=relation_types,
+            limit=limit,
+        )
+        if "error" in context:
+            return json.dumps(context)
+        anchor_note = graph.get_note(context["anchor"])
+        context["anchor_title"] = anchor_note.title if anchor_note else context["anchor"]
+        return json.dumps(context, indent=2)
     
     elif name == "list_tags":
         tags = graph.list_tags()
@@ -655,7 +776,12 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             "total_links": stats.total_links,
             "total_tags": stats.total_tags,
             "orphan_notes": stats.orphan_notes,
-            "most_connected": most_connected
+            "most_connected": most_connected,
+            "total_relationships": stats.total_relationships,
+            "relationship_counts": [
+                {"type": relation_type, "count": count}
+                for relation_type, count in stats.relationship_counts
+            ],
         }, indent=2)
     
     elif name == "list_notes":
@@ -789,6 +915,8 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
     elif name == "get_context":
         query = arguments["query"]
         limit = arguments.get("limit", 10)
+        graph_depth = min(arguments.get("graph_depth", 2), 5)
+        graph_limit = arguments.get("graph_limit", 8)
         notes = graph.search(query, limit)
         followups = _load_followups()
         query_lower = query.lower()
@@ -803,10 +931,24 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             brief["excerpt"] = _extract_excerpt(note, query)
             brief["relevance"] = 1
             context_notes.append(brief)
+
+        graph_context = None
+        if notes:
+            graph_context = graph.graph_context(
+                notes[0].id,
+                depth=graph_depth,
+                limit=graph_limit,
+            )
+            if "error" not in graph_context:
+                anchor_note = graph.get_note(graph_context["anchor"])
+                graph_context["anchor_title"] = (
+                    anchor_note.title if anchor_note else graph_context["anchor"]
+                )
         return json.dumps({
             "query": query,
             "context_notes": context_notes,
-            "related_followups": matching_followups
+            "related_followups": matching_followups,
+            "graph_context": graph_context,
         }, indent=2)
 
     elif name == "get_note_summary":

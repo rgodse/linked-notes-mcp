@@ -7,6 +7,7 @@ import pytest
 
 from linked_notes_mcp.parser import (
     Link,
+    extract_relationships,
     extract_markdown_links,
     extract_tags,
     extract_title,
@@ -132,6 +133,21 @@ class TestExtractTags:
         assert tags == []
 
 
+class TestExtractRelationships:
+    def test_string_relationship(self):
+        relationships = extract_relationships({"depends_on": "Auth Service"})
+        assert len(relationships) == 1
+        assert relationships[0].target == "auth-service"
+        assert relationships[0].relation_type == "depends_on"
+
+    def test_list_relationships(self):
+        relationships = extract_relationships(
+            {"blocks": ["Beta Note", "Gamma Note"], "ignored": "value"}
+        )
+        assert [r.target for r in relationships] == ["beta-note", "gamma-note"]
+        assert all(r.relation_type == "blocks" for r in relationships)
+
+
 class TestParseNote:
     def test_full_note(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -140,6 +156,9 @@ class TestParseNote:
 title: Test Note
 tags:
   - testing
+depends_on:
+  - Another Note
+related_to: Third
 ---
 
 # Test Note
@@ -154,3 +173,4 @@ Also see [markdown link](other.md).
             assert note.title == "Test Note"
             assert note.tags == ["testing"]
             assert len(note.outgoing_links) == 3
+            assert len(note.explicit_relationships) == 2

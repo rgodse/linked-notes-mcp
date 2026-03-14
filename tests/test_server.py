@@ -22,7 +22,7 @@ from linked_notes_mcp.server import (
 def vault(tmp_path):
     """Create a minimal vault and initialize the global graph."""
     (tmp_path / "alpha.md").write_text(
-        "---\ntitle: Alpha Note\ntags: [test]\n---\n"
+        "---\ntitle: Alpha Note\ntags: [test]\ndepends_on: [Beta Note]\nrelated_to: [Gamma Note]\n---\n"
         "This is the alpha note body. It contains the word python.\n"
         "More content here about programming.\n"
     )
@@ -101,6 +101,7 @@ class TestGetContext:
         assert "query" in result
         assert "context_notes" in result
         assert "related_followups" in result
+        assert "graph_context" in result
 
     @pytest.mark.asyncio
     async def test_get_context_notes_have_excerpt(self, vault):
@@ -116,6 +117,28 @@ class TestGetContext:
         result = json.loads(await handle_tool_call("get_context", {"query": "alpha"}))
         topics = [f["topic"] for f in result["related_followups"]]
         assert any("alpha" in t for t in topics)
+
+    @pytest.mark.asyncio
+    async def test_get_context_includes_graph_anchor(self, vault):
+        result = json.loads(await handle_tool_call("get_context", {"query": "alpha"}))
+        assert result["graph_context"]["anchor"] == "alpha"
+
+
+class TestGraphTools:
+    @pytest.mark.asyncio
+    async def test_list_relationships(self, vault):
+        result = json.loads(await handle_tool_call("list_relationships", {"identifier": "alpha"}))
+        outgoing_types = {item["type"] for item in result["outgoing"]}
+        assert "depends_on" in outgoing_types
+        assert "related_to" in outgoing_types
+
+    @pytest.mark.asyncio
+    async def test_get_graph_context(self, vault):
+        result = json.loads(
+            await handle_tool_call("get_graph_context", {"identifier": "alpha", "depth": 2})
+        )
+        assert result["anchor"] == "alpha"
+        assert any(node["id"] == "beta" for node in result["nodes"])
 
 
 # ---------------------------------------------------------------------------
