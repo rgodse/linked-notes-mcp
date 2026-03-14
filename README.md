@@ -219,6 +219,8 @@ The body should still exist, but treat it as supporting detail. The frontmatter 
 | `review_relationship_suggestions(...)` | See pending/accepted/rejected suggestions |
 | `accept_relationship_suggestion(...)` | Apply a reviewed relationship suggestion |
 | `reject_relationship_suggestion(...)` | Record a rejected suggestion so it stops resurfacing |
+| `memory_dashboard(...)` | Compact operational view of weak notes, stale notes, and pending suggestions |
+| `promote_to_memory_node(...)` | Convert raw work output into a structured memory node |
 
 ### Template Coverage
 
@@ -247,6 +249,7 @@ Followups are stored in `.linked_notes_followups.json` in the vault root. Add th
 1. Ask for `get_context("project or topic")`
 2. If one note is clearly central, call `get_graph_context` on it
 3. Traverse or inspect `list_relationships` before making changes
+4. Use `memory_dashboard()` when you want a compact view of what needs maintenance
 
 ### During work
 
@@ -254,6 +257,7 @@ Followups are stored in `.linked_notes_followups.json` in the vault root. Add th
 2. Prefer `upsert_memory_node` and `update_relationships` for durable graph memory objects
 3. Save decisions explicitly
 4. Add followups for anything that should survive the session
+5. Use `promote_to_memory_node` when you have raw notes or messy outputs that should become structured memory
 
 ### Session end
 

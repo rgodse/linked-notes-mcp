@@ -302,6 +302,32 @@ class TestStructuredMemoryTools:
         )
         assert reject["status"] == "success"
 
+    @pytest.mark.asyncio
+    async def test_memory_dashboard(self, vault):
+        result = json.loads(await handle_tool_call("memory_dashboard", {}))
+        assert "summary" in result
+        assert "weak_notes" in result
+        assert "pending_suggestions" in result
+        assert "stale_notes" in result
+
+    @pytest.mark.asyncio
+    async def test_promote_to_memory_node(self, vault):
+        result = json.loads(
+            await handle_tool_call(
+                "promote_to_memory_node",
+                {
+                    "title": "Quarterly Planning",
+                    "raw_text": "Workstream for quarterly planning with owners, dependencies, and open questions.",
+                    "project": "planning",
+                    "aliases": ["Q Planning"],
+                },
+            )
+        )
+        assert result["status"] == "success"
+        assert result["note"]["frontmatter"]["summary"]
+        assert result["note"]["frontmatter"]["project"] == "planning"
+        assert result["note"]["aliases"] == ["Q Planning"]
+
 
 # ---------------------------------------------------------------------------
 # get_note_summary

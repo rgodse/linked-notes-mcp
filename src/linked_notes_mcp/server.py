@@ -157,6 +157,41 @@ def _review_confidence(review: dict, suggestion_score: int) -> float:
     return round(confidence, 2)
 
 
+def _infer_entity_type(raw_text: str, explicit_entity_type: Optional[str]) -> str:
+    """Infer a memory node type from raw text if the caller did not specify one."""
+
+    if explicit_entity_type:
+        return explicit_entity_type
+
+    text = raw_text.lower()
+    if "decision" in text or "decided" in text:
+        return "decision"
+    if "meeting" in text or "attendees" in text:
+        return "meeting"
+    if "research" in text or "findings" in text:
+        return "research"
+    if "stakeholder" in text or "owner" in text:
+        return "stakeholder"
+    if "service" in text or "api" in text:
+        return "service"
+    if "issue" in text or "blocker" in text or "bug" in text:
+        return "issue"
+    if "workstream" in text:
+        return "workstream"
+    return "project"
+
+
+def _infer_summary(raw_text: str, explicit_summary: Optional[str]) -> str:
+    """Pick a short summary from raw text."""
+
+    if explicit_summary:
+        return explicit_summary
+    compact = " ".join(raw_text.strip().split())
+    if len(compact) <= 160:
+        return compact
+    return compact[:157].rstrip() + "..."
+
+
 # Define tools
 TOOLS = [
     Tool(
@@ -618,6 +653,59 @@ TOOLS = [
                 "reason": {"type": "string", "description": "Optional rejection reason"}
             },
             "required": ["source_id", "target_id", "suggested_type"]
+        }
+    ),
+    Tool(
+        name="memory_dashboard",
+        description="Return a compact operational dashboard for the memory graph: weak notes, pending suggestions, stale notes, and summary counts.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "health_limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Maximum weak notes to return"
+                },
+                "suggestion_limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Maximum suggestions to return"
+                },
+                "stale_limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Maximum stale notes to return"
+                }
+            }
+        }
+    ),
+    Tool(
+        name="promote_to_memory_node",
+        description="Turn loosely structured work output into a structured memory node with agent-first frontmatter.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Canonical title for the memory node"},
+                "raw_text": {"type": "string", "description": "Loose content to convert into structured memory"},
+                "entity_type": {"type": "string", "description": "Optional explicit type like project, workstream, stakeholder, research, decision, service, or issue"},
+                "project": {"type": "string", "description": "Optional project or workstream grouping"},
+                "status": {"type": "string", "description": "Optional status"},
+                "aliases": {"type": "array", "items": {"type": "string"}},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "summary": {"type": "string", "description": "Optional explicit summary override"},
+                "relationships": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "target": {"type": "string"}
+                        },
+                        "required": ["type", "target"]
+                    }
+                }
+            },
+            "required": ["title", "raw_text"]
         }
     ),
     # ==================== Template Tools ====================
@@ -1233,6 +1321,92 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             "message": f"Rejected relationship suggestion for {source_id} -> {target_id}",
             "review": reviews[key],
         }, indent=2)
+
+    elif name == "memory_dashboard":
+        health_limit = arguments.get("health_limit", 10)
+        suggestion_limit = arguments.get("suggestion_limit", 10)
+        stale_limit = arguments.get("stale_limit", 10)
+        stats = graph.get_stats()
+        health_items = graph.get_graph_health(health_limit)
+        stale_notes = graph.list_stale_notes()[:stale_limit]
+        reviews = _load_reviews()
+        suggestions = graph.suggest_relationships(suggestion_limit)
+        pending_suggestions = []
+        for suggestion in suggestions:
+            key = _suggestion_key(
+                suggestion.source_id,
+                suggestion.target_id,
+                suggestion.suggested_type,
+            )
+            review = reviews.get(key, {"state": "pending"})
+            if review.get("state", "pending") != "pending":
+                continue
+            pending_suggestions.append(
+                {
+                    "source_id": suggestion.source_id,
+                    "target_id": suggestion.target_id,
+                    "suggested_type": suggestion.suggested_type,
+                    "score": suggestion.score,
+                    "confidence": _review_confidence(review, suggestion.score),
+                    "reasons": suggestion.reasons,
+                }
+            )
+
+        return json.dumps(
+            {
+                "summary": {
+                    "total_notes": stats.total_notes,
+                    "total_links": stats.total_links,
+                    "total_relationships": stats.total_relationships,
+                    "orphan_notes": stats.orphan_notes,
+                    "pending_suggestions": len(pending_suggestions),
+                    "reviewed_suggestions": len(reviews),
+                    "stale_notes": len(graph.list_stale_notes()),
+                },
+                "weak_notes": [
+                    {
+                        "note_id": item.note_id,
+                        "score": item.score,
+                        "max_score": item.max_score,
+                        "issues": item.issues,
+                    }
+                    for item in health_items
+                ],
+                "pending_suggestions": pending_suggestions,
+                "stale_notes": [
+                    {
+                        "id": note.id,
+                        "title": note.title,
+                        "expires": str(note.frontmatter.get("expires", "")),
+                    }
+                    for note in stale_notes
+                ],
+            },
+            indent=2,
+        )
+
+    elif name == "promote_to_memory_node":
+        entity_type = _infer_entity_type(arguments["raw_text"], arguments.get("entity_type"))
+        summary = _infer_summary(arguments["raw_text"], arguments.get("summary"))
+        note = graph.upsert_memory_node(
+            title=arguments["title"],
+            summary=summary,
+            entity_type=entity_type,
+            project=arguments.get("project"),
+            status=arguments.get("status"),
+            aliases=arguments.get("aliases"),
+            tags=arguments.get("tags"),
+            relationships=arguments.get("relationships"),
+            body=arguments["raw_text"],
+        )
+        return json.dumps(
+            {
+                "status": "success",
+                "message": f"Promoted to memory node: {note.title}",
+                "note": format_note_full(note),
+            },
+            indent=2,
+        )
 
     # ==================== Template Tool Handlers ====================
     elif name == "list_templates":

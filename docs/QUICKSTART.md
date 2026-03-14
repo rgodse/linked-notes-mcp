@@ -82,6 +82,8 @@ Try these prompts:
 - "Suggest missing relationships"
 - "Review pending relationship suggestions"
 - "Show me suggestions with confidence and review state"
+- "Show me the memory dashboard"
+- "Promote this raw meeting summary into a structured memory node"
 - "Get context on API Gateway"
 - "List relationships for API Gateway"
 - "Show graph context around API Gateway"
