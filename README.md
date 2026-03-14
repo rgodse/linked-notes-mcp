@@ -213,6 +213,10 @@ The body should still exist, but treat it as supporting detail. The frontmatter 
 | `lint_memory_graph()` | Find weak nodes missing structure or freshness metadata |
 | `suggest_relationships(limit?)` | Propose likely graph edges from shared structure |
 | `merge_memory_nodes(source, target)` | Merge duplicate or overlapping memory nodes |
+| `get_memory_health(identifier?)` | Score nodes by retrieval-readiness |
+| `review_relationship_suggestions(...)` | See pending/accepted/rejected suggestions |
+| `accept_relationship_suggestion(...)` | Apply a reviewed relationship suggestion |
+| `reject_relationship_suggestion(...)` | Record a rejected suggestion so it stops resurfacing |
 
 Followups are stored in `.linked_notes_followups.json` in the vault root. Add that file to `.gitignore` if you do not want reminders committed.
 
@@ -242,9 +246,11 @@ Followups are stored in `.linked_notes_followups.json` in the vault root. Add th
 Run this periodically:
 
 1. `lint_memory_graph()`
-2. `suggest_relationships()`
-3. `merge_memory_nodes(...)` for duplicates
-4. refresh `last_reviewed`, `importance`, and `confidence`
+2. `get_memory_health()`
+3. `review_relationship_suggestions()`
+4. accept or reject good suggestions
+5. `merge_memory_nodes(...)` for duplicates
+6. refresh `last_reviewed`, `importance`, and `confidence`
 
 ## Development
 

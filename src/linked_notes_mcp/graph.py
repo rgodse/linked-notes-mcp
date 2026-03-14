@@ -62,6 +62,16 @@ class RelationshipSuggestion:
 
 
 @dataclass
+class NoteHealth:
+    """Health score for a memory node."""
+
+    note_id: str
+    score: int
+    max_score: int
+    issues: list[str]
+
+
+@dataclass
 class TraversalResult:
     """Result of traversing the graph from a starting node."""
 
@@ -1049,6 +1059,63 @@ class KnowledgeGraph:
             self.delete_note(source.id)
 
         return updated_target
+
+    def get_note_health(self, identifier: str) -> Optional[NoteHealth]:
+        """Compute health for a single note."""
+
+        note = self.get_note(identifier)
+        if not note:
+            return None
+
+        max_score = 10
+        score = 0
+        issues: list[str] = []
+        frontmatter = note.frontmatter
+
+        if frontmatter.get("entity_type"):
+            score += 2
+        else:
+            issues.append("missing entity_type")
+
+        if frontmatter.get("summary"):
+            score += 2
+        else:
+            issues.append("missing summary")
+
+        if note.aliases:
+            score += 1
+        else:
+            issues.append("missing aliases")
+
+        if self.graph.in_degree(note.id) + self.graph.out_degree(note.id) > 0:
+            score += 2
+        else:
+            issues.append("no graph connections")
+
+        if frontmatter.get("confidence") is not None:
+            score += 1
+        else:
+            issues.append("missing confidence")
+
+        if frontmatter.get("last_reviewed"):
+            score += 1
+        else:
+            issues.append("missing last_reviewed")
+
+        if frontmatter.get("importance"):
+            score += 1
+        else:
+            issues.append("missing importance")
+
+        return NoteHealth(note_id=note.id, score=score, max_score=max_score, issues=issues)
+
+    def get_graph_health(self, limit: int = 50) -> list[NoteHealth]:
+        """Rank notes by health so weak memory nodes are easy to improve."""
+
+        health = [self.get_note_health(note.id) for note in self.notes.values()]
+        health = [item for item in health if item is not None]
+        health.sort(key=lambda item: (item.score, len(item.issues), item.note_id))
+        return health[:limit]
 
     def append_to_note(self, identifier: str, content: str) -> Note:
         """Append content to an existing note."""

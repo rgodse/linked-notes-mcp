@@ -75,6 +75,7 @@ If you skip those habits, the system falls back to plain note search.
 Run maintenance regularly:
 
 - lint the graph
+- score memory health
 - accept or reject suggested relationships
 - merge duplicate nodes
 - review stale but important notes

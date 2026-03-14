@@ -447,6 +447,19 @@ class TestWriteOperations:
         assert source is not None
         assert source.frontmatter["status"] == "merged"
 
+    def test_get_note_health(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        health = graph.get_note_health("note-a")
+        assert health is not None
+        assert health.score > 0
+        assert health.max_score == 10
+
+    def test_get_graph_health(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        health = graph.get_graph_health()
+        assert health
+        assert all(item.max_score == 10 for item in health)
+
 
 class TestBugFixes:
     """Tests for specific bug fixes."""

@@ -224,6 +224,84 @@ class TestStructuredMemoryTools:
         )
         assert result["status"] == "success"
 
+    @pytest.mark.asyncio
+    async def test_get_memory_health(self, vault):
+        result = json.loads(await handle_tool_call("get_memory_health", {"identifier": "alpha"}))
+        assert result["note_id"] == "alpha"
+        assert result["max_score"] == 10
+
+    @pytest.mark.asyncio
+    async def test_review_relationship_suggestions(self, vault):
+        await handle_tool_call(
+            "upsert_memory_node",
+            {
+                "title": "Loose Service",
+                "summary": "Service for graph-memory project",
+                "entity_type": "service",
+                "project": "graph-memory",
+                "tags": ["test"],
+            },
+        )
+        await handle_tool_call(
+            "upsert_memory_node",
+            {
+                "title": "Loose Decision",
+                "summary": "Decision for graph-memory project",
+                "entity_type": "decision",
+                "project": "graph-memory",
+                "tags": ["test"],
+            },
+        )
+        result = json.loads(await handle_tool_call("review_relationship_suggestions", {"state": "all"}))
+        assert isinstance(result, list)
+
+    @pytest.mark.asyncio
+    async def test_accept_and_reject_relationship_suggestion(self, vault):
+        await handle_tool_call(
+            "upsert_memory_node",
+            {
+                "title": "Loose Service",
+                "summary": "Service for graph-memory project",
+                "entity_type": "service",
+                "project": "graph-memory",
+                "tags": ["test"],
+            },
+        )
+        await handle_tool_call(
+            "upsert_memory_node",
+            {
+                "title": "Loose Decision",
+                "summary": "Decision for graph-memory project",
+                "entity_type": "decision",
+                "project": "graph-memory",
+                "tags": ["test"],
+            },
+        )
+        accept = json.loads(
+            await handle_tool_call(
+                "accept_relationship_suggestion",
+                {
+                    "source_id": "loose-decision",
+                    "target_id": "loose-service",
+                    "suggested_type": "decision_for",
+                },
+            )
+        )
+        assert accept["status"] == "success"
+
+        reject = json.loads(
+            await handle_tool_call(
+                "reject_relationship_suggestion",
+                {
+                    "source_id": "loose-service",
+                    "target_id": "alpha",
+                    "suggested_type": "related_to",
+                    "reason": "not useful",
+                },
+            )
+        )
+        assert reject["status"] == "success"
+
 
 # ---------------------------------------------------------------------------
 # get_note_summary

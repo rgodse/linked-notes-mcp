@@ -124,6 +124,28 @@ def _save_followups(followups: list[dict]) -> None:
     _followups_path().write_text(json.dumps(followups, indent=2), encoding="utf-8")
 
 
+def _reviews_path() -> Path:
+    return Path(_graph.vault_path) / ".linked_notes_reviews.json"
+
+
+def _load_reviews() -> dict[str, dict]:
+    fp = _reviews_path()
+    if not fp.exists():
+        return {}
+    try:
+        return json.loads(fp.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_reviews(reviews: dict[str, dict]) -> None:
+    _reviews_path().write_text(json.dumps(reviews, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _suggestion_key(source_id: str, target_id: str, suggested_type: str) -> str:
+    return f"{source_id}|{target_id}|{suggested_type}"
+
+
 # Define tools
 TOOLS = [
     Tool(
@@ -531,6 +553,60 @@ TOOLS = [
                 "archive_source": {"type": "boolean", "default": True, "description": "Archive the source note instead of deleting it"}
             },
             "required": ["source_identifier", "target_identifier"]
+        }
+    ),
+    Tool(
+        name="get_memory_health",
+        description="Score memory-node health based on structure, connectivity, and freshness metadata so the agent can improve weak notes.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "identifier": {"type": "string", "description": "Optional note ID or title"},
+                "limit": {"type": "integer", "default": 50, "description": "Maximum nodes to return when listing graph health"}
+            }
+        }
+    ),
+    Tool(
+        name="review_relationship_suggestions",
+        description="List relationship suggestions together with their review state so the agent can process them systematically.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "default": 20, "description": "Maximum suggestions to return"},
+                "state": {
+                    "type": "string",
+                    "enum": ["pending", "accepted", "rejected", "all"],
+                    "default": "pending",
+                    "description": "Filter suggestions by review state"
+                }
+            }
+        }
+    ),
+    Tool(
+        name="accept_relationship_suggestion",
+        description="Accept a suggested relationship and apply it to the graph.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source_id": {"type": "string"},
+                "target_id": {"type": "string"},
+                "suggested_type": {"type": "string"}
+            },
+            "required": ["source_id", "target_id", "suggested_type"]
+        }
+    ),
+    Tool(
+        name="reject_relationship_suggestion",
+        description="Reject a suggested relationship and record that decision so it does not keep resurfacing as pending.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source_id": {"type": "string"},
+                "target_id": {"type": "string"},
+                "suggested_type": {"type": "string"},
+                "reason": {"type": "string", "description": "Optional rejection reason"}
+            },
+            "required": ["source_id", "target_id", "suggested_type"]
         }
     ),
     # ==================== Template Tools ====================
@@ -1049,6 +1125,95 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             }, indent=2)
         except ValueError as e:
             return json.dumps({"error": str(e)})
+
+    elif name == "get_memory_health":
+        identifier = arguments.get("identifier")
+        if identifier:
+            health = graph.get_note_health(identifier)
+            if health is None:
+                return json.dumps({"error": f"Note not found: {identifier}"})
+            return json.dumps({
+                "note_id": health.note_id,
+                "score": health.score,
+                "max_score": health.max_score,
+                "issues": health.issues,
+            }, indent=2)
+
+        health_items = graph.get_graph_health(arguments.get("limit", 50))
+        return json.dumps([
+            {
+                "note_id": item.note_id,
+                "score": item.score,
+                "max_score": item.max_score,
+                "issues": item.issues,
+            }
+            for item in health_items
+        ], indent=2)
+
+    elif name == "review_relationship_suggestions":
+        state = arguments.get("state", "pending")
+        suggestions = graph.suggest_relationships(arguments.get("limit", 20))
+        reviews = _load_reviews()
+        result = []
+        for suggestion in suggestions:
+            key = _suggestion_key(
+                suggestion.source_id,
+                suggestion.target_id,
+                suggestion.suggested_type,
+            )
+            review = reviews.get(key, {"state": "pending"})
+            if state != "all" and review.get("state", "pending") != state:
+                continue
+            result.append(
+                {
+                    "source_id": suggestion.source_id,
+                    "target_id": suggestion.target_id,
+                    "suggested_type": suggestion.suggested_type,
+                    "score": suggestion.score,
+                    "reasons": suggestion.reasons,
+                    "review": review,
+                }
+            )
+        return json.dumps(result, indent=2)
+
+    elif name == "accept_relationship_suggestion":
+        source_id = arguments["source_id"]
+        target_id = arguments["target_id"]
+        suggested_type = arguments["suggested_type"]
+        note = graph.update_relationships(
+            identifier=source_id,
+            add=[{"type": suggested_type, "target": target_id}],
+        )
+        reviews = _load_reviews()
+        key = _suggestion_key(source_id, target_id, suggested_type)
+        reviews[key] = {
+            "state": "accepted",
+            "updated_at": datetime.now().isoformat(),
+        }
+        _save_reviews(reviews)
+        return json.dumps({
+            "status": "success",
+            "message": f"Accepted relationship suggestion for {source_id} -> {target_id}",
+            "note": format_note_full(note),
+        }, indent=2)
+
+    elif name == "reject_relationship_suggestion":
+        source_id = arguments["source_id"]
+        target_id = arguments["target_id"]
+        suggested_type = arguments["suggested_type"]
+        reviews = _load_reviews()
+        key = _suggestion_key(source_id, target_id, suggested_type)
+        reviews[key] = {
+            "state": "rejected",
+            "reason": arguments.get("reason"),
+            "updated_at": datetime.now().isoformat(),
+        }
+        _save_reviews(reviews)
+        return json.dumps({
+            "status": "success",
+            "message": f"Rejected relationship suggestion for {source_id} -> {target_id}",
+            "review": reviews[key],
+        }, indent=2)
 
     # ==================== Template Tool Handlers ====================
     elif name == "list_templates":
