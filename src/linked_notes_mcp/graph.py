@@ -41,6 +41,27 @@ class GraphStats:
 
 
 @dataclass
+class LintIssue:
+    """Quality issue found in the memory graph."""
+
+    note_id: str
+    severity: str
+    issue_type: str
+    message: str
+
+
+@dataclass
+class RelationshipSuggestion:
+    """Suggested relationship between two notes."""
+
+    source_id: str
+    target_id: str
+    suggested_type: str
+    score: int
+    reasons: list[str]
+
+
+@dataclass
 class TraversalResult:
     """Result of traversing the graph from a starting node."""
 
@@ -330,6 +351,40 @@ class KnowledgeGraph:
         edge_types = set(self.graph[source][target].get("relationship_types", []))
         return bool(edge_types.intersection(allowed))
 
+    def _note_priority(self, note: Note) -> int:
+        """Score structured priority metadata for retrieval."""
+
+        score = 0
+        importance = str(note.frontmatter.get("importance", "")).lower()
+        if importance == "high":
+            score += 4
+        elif importance == "medium":
+            score += 2
+
+        confidence_raw = note.frontmatter.get("confidence")
+        try:
+            confidence = float(confidence_raw)
+            if confidence >= 0.8:
+                score += 3
+            elif confidence >= 0.5:
+                score += 1
+        except (TypeError, ValueError):
+            pass
+
+        last_reviewed_raw = note.frontmatter.get("last_reviewed")
+        if last_reviewed_raw:
+            try:
+                reviewed = datetime.fromisoformat(str(last_reviewed_raw))
+                age_days = max(0, (datetime.now() - reviewed).days)
+                if age_days <= 14:
+                    score += 2
+                elif age_days <= 60:
+                    score += 1
+            except ValueError:
+                pass
+
+        return score
+
     def find_path(self, start_id: str, end_id: str) -> Optional[list[str]]:
         """Find shortest path between two notes."""
 
@@ -394,6 +449,7 @@ class KnowledgeGraph:
             status = str(note.frontmatter.get("status", "")).lower()
             if query_lower in status:
                 score += 3
+            score += self._note_priority(note)
             for relationship in note.explicit_relationships:
                 if query_lower in relationship.relation_type:
                     score += 4
@@ -449,6 +505,7 @@ class KnowledgeGraph:
                 continue
             note = self.notes[node_id]
             score = max(1, (depth + 1) - distance) + len(relationship_counts) * 2
+            score += self._note_priority(note)
             nodes.append(
                 {
                     "id": note.id,
@@ -861,6 +918,137 @@ class KnowledgeGraph:
             encoding="utf-8",
         )
         return self._reload_note_from_disk(note)
+
+    def lint_graph(self) -> list[LintIssue]:
+        """Find notes that are weak for agent retrieval."""
+
+        issues: list[LintIssue] = []
+        for note in self.notes.values():
+            frontmatter = note.frontmatter
+            if not frontmatter.get("entity_type"):
+                issues.append(LintIssue(note.id, "warning", "missing_entity_type", "Missing entity_type"))
+            if not frontmatter.get("summary"):
+                issues.append(LintIssue(note.id, "warning", "missing_summary", "Missing summary"))
+            if self.graph.in_degree(note.id) + self.graph.out_degree(note.id) == 0:
+                issues.append(LintIssue(note.id, "info", "orphan", "No graph connections"))
+            if not note.aliases:
+                issues.append(LintIssue(note.id, "info", "missing_aliases", "No aliases configured"))
+            if frontmatter.get("confidence") is None:
+                issues.append(LintIssue(note.id, "info", "missing_confidence", "Missing confidence score"))
+            if not frontmatter.get("last_reviewed"):
+                issues.append(
+                    LintIssue(note.id, "info", "missing_last_reviewed", "Missing last_reviewed timestamp")
+                )
+        return issues
+
+    def suggest_relationships(self, limit: int = 20) -> list[RelationshipSuggestion]:
+        """Suggest new relationships using shared structure."""
+
+        suggestions: list[RelationshipSuggestion] = []
+        note_ids = sorted(self.notes)
+        for index, source_id in enumerate(note_ids):
+            source = self.notes[source_id]
+            for target_id in note_ids[index + 1 :]:
+                target = self.notes[target_id]
+                if self.graph.has_edge(source_id, target_id) or self.graph.has_edge(target_id, source_id):
+                    continue
+
+                score = 0
+                reasons: list[str] = []
+                shared_tags = sorted(set(source.tags).intersection(target.tags))
+                if shared_tags:
+                    score += len(shared_tags) * 2
+                    reasons.append(f"shared tags: {', '.join(shared_tags)}")
+
+                source_project = source.frontmatter.get("project")
+                target_project = target.frontmatter.get("project")
+                if source_project and source_project == target_project:
+                    score += 3
+                    reasons.append(f"same project: {source_project}")
+
+                source_summary = str(source.frontmatter.get("summary", "")).lower()
+                target_summary = str(target.frontmatter.get("summary", "")).lower()
+                if source.title.lower() in target_summary or target.title.lower() in source_summary:
+                    score += 2
+                    reasons.append("title mentioned in counterpart summary")
+
+                if score < 3:
+                    continue
+
+                suggested_type = "related_to"
+                if source.frontmatter.get("entity_type") == "decision":
+                    suggested_type = "decision_for"
+                suggestions.append(
+                    RelationshipSuggestion(
+                        source_id=source_id,
+                        target_id=target_id,
+                        suggested_type=suggested_type,
+                        score=score,
+                        reasons=reasons,
+                    )
+                )
+
+        suggestions.sort(key=lambda item: (-item.score, item.source_id, item.target_id))
+        return suggestions[:limit]
+
+    def merge_memory_nodes(
+        self,
+        source_identifier: str,
+        target_identifier: str,
+        archive_source: bool = True,
+    ) -> Note:
+        """Merge one memory node into another."""
+
+        source = self.get_note(source_identifier)
+        target = self.get_note(target_identifier)
+        if not source or not target:
+            raise ValueError("Both source and target notes must exist")
+        if source.id == target.id:
+            raise ValueError("Source and target must be different notes")
+
+        target_frontmatter = target.frontmatter.copy()
+        source_frontmatter = source.frontmatter.copy()
+        target_frontmatter["aliases"] = list(
+            dict.fromkeys(target.aliases + [source.title] + source.aliases)
+        )
+
+        for field in ("summary", "project", "status", "entity_type"):
+            if not target_frontmatter.get(field) and source_frontmatter.get(field):
+                target_frontmatter[field] = source_frontmatter[field]
+
+        for relation_type in RELATIONSHIP_FIELDS:
+            combined: list[str] = []
+            for frontmatter in (target_frontmatter, source_frontmatter):
+                value = frontmatter.get(relation_type)
+                if isinstance(value, str):
+                    combined.append(value)
+                elif isinstance(value, list):
+                    combined.extend(str(item) for item in value)
+            if combined:
+                target_frontmatter[relation_type] = list(dict.fromkeys(combined))
+
+        merged_body = target.body
+        if source.body and source.body not in merged_body:
+            merged_body = merged_body.rstrip() + f"\n\n## Merged Context From {source.title}\n\n" + source.body
+
+        target.path.write_text(
+            f"---\n{yaml.dump(target_frontmatter, default_flow_style=False)}---\n\n{merged_body}",
+            encoding="utf-8",
+        )
+        updated_target = self._reload_note_from_disk(target)
+
+        if archive_source:
+            source_frontmatter["status"] = "merged"
+            source_frontmatter["merged_into"] = updated_target.title
+            source.path.write_text(
+                f"---\n{yaml.dump(source_frontmatter, default_flow_style=False)}---\n\nMerged into [[{updated_target.title}]].",
+                encoding="utf-8",
+            )
+            self._reload_note_from_disk(source)
+        else:
+            self.delete_note(source.id)
+
+        return updated_target
 
     def append_to_note(self, identifier: str, content: str) -> Note:
         """Append content to an existing note."""

@@ -498,6 +498,41 @@ TOOLS = [
             "required": ["identifier"]
         }
     ),
+    Tool(
+        name="lint_memory_graph",
+        description="Analyze the vault for weak memory nodes such as missing entity_type, missing summary, orphan notes, and missing confidence or review metadata.",
+        inputSchema={
+            "type": "object",
+            "properties": {}
+        }
+    ),
+    Tool(
+        name="suggest_relationships",
+        description="Suggest likely graph relationships based on shared tags, project membership, and summary overlap.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "description": "Maximum number of suggestions to return"
+                }
+            }
+        }
+    ),
+    Tool(
+        name="merge_memory_nodes",
+        description="Merge one memory node into another, preserving aliases and relationships and optionally archiving the source node.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source_identifier": {"type": "string", "description": "Source note ID or title"},
+                "target_identifier": {"type": "string", "description": "Target note ID or title"},
+                "archive_source": {"type": "boolean", "default": True, "description": "Archive the source note instead of deleting it"}
+            },
+            "required": ["source_identifier", "target_identifier"]
+        }
+    ),
     # ==================== Template Tools ====================
     Tool(
         name="list_templates",
@@ -964,6 +999,52 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             return json.dumps({
                 "status": "success",
                 "message": f"Updated relationships for: {note.title}",
+                "note": format_note_full(note)
+            }, indent=2)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    elif name == "lint_memory_graph":
+        issues = graph.lint_graph()
+        return json.dumps(
+            [
+                {
+                    "note_id": issue.note_id,
+                    "severity": issue.severity,
+                    "issue_type": issue.issue_type,
+                    "message": issue.message,
+                }
+                for issue in issues
+            ],
+            indent=2,
+        )
+
+    elif name == "suggest_relationships":
+        suggestions = graph.suggest_relationships(arguments.get("limit", 20))
+        return json.dumps(
+            [
+                {
+                    "source_id": suggestion.source_id,
+                    "target_id": suggestion.target_id,
+                    "suggested_type": suggestion.suggested_type,
+                    "score": suggestion.score,
+                    "reasons": suggestion.reasons,
+                }
+                for suggestion in suggestions
+            ],
+            indent=2,
+        )
+
+    elif name == "merge_memory_nodes":
+        try:
+            note = graph.merge_memory_nodes(
+                source_identifier=arguments["source_identifier"],
+                target_identifier=arguments["target_identifier"],
+                archive_source=arguments.get("archive_source", True),
+            )
+            return json.dumps({
+                "status": "success",
+                "message": f"Merged into: {note.title}",
                 "note": format_note_full(note)
             }, indent=2)
         except ValueError as e:

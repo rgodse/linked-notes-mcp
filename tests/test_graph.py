@@ -23,6 +23,9 @@ entity_type: project
 project: graph-memory
 status: active
 summary: Central project anchor note
+importance: high
+confidence: 0.9
+last_reviewed: 2026-03-10T00:00:00
 depends_on: [Note B]
 related_to: [Note C]
 ---
@@ -395,6 +398,54 @@ class TestWriteOperations:
         assert context["anchor"] == "note-a"
         assert any(node["id"] == "note-b" for node in context["nodes"])
         assert any(edge["relationships"] for edge in context["edges"])
+
+    def test_lint_graph(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        issues = graph.lint_graph()
+        issue_types = {issue.issue_type for issue in issues}
+        assert "missing_entity_type" in issue_types
+        assert "missing_summary" in issue_types
+
+    def test_suggest_relationships(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        graph.upsert_memory_node(
+            title="Loose Service",
+            summary="Service for graph-memory project",
+            entity_type="service",
+            project="graph-memory",
+            tags=["alpha"],
+        )
+        graph.upsert_memory_node(
+            title="Loose Decision",
+            summary="Decision tied to graph-memory project",
+            entity_type="decision",
+            project="graph-memory",
+            tags=["alpha"],
+        )
+        suggestions = graph.suggest_relationships()
+        assert suggestions
+        assert any(s.suggested_type == "related_to" for s in suggestions)
+
+    def test_merge_memory_nodes(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+        graph.upsert_memory_node(
+            title="Gateway Memory",
+            summary="Primary gateway node",
+            entity_type="service",
+            aliases=["Gateway"],
+        )
+        graph.upsert_memory_node(
+            title="Gateway Duplicate",
+            summary="Duplicate gateway note",
+            entity_type="service",
+            aliases=["API Gateway"],
+        )
+
+        merged = graph.merge_memory_nodes("Gateway Duplicate", "Gateway Memory")
+        assert "Gateway Duplicate" in merged.aliases
+        source = graph.get_note("Gateway Duplicate")
+        assert source is not None
+        assert source.frontmatter["status"] == "merged"
 
 
 class TestBugFixes:

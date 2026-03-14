@@ -50,6 +50,7 @@ Why these fields matter:
 - `project` lets retrieval group notes by workstream
 - `status` helps distinguish active vs stale memory
 - `summary` gives a short retrieval target that is better than scraping prose from the body
+- `importance`, `confidence`, and `last_reviewed` help ranking and memory quality checks
 
 ## Features
 
@@ -205,6 +206,14 @@ The body should still exist, but treat it as supporting detail. The frontmatter 
 | `save_decision(...)` | Decision log with rationale |
 | `add_followup(topic, reminder)` | Persistent reminder across sessions |
 
+### Maintenance Tools
+
+| Tool | What it is good for |
+|------|----------------------|
+| `lint_memory_graph()` | Find weak nodes missing structure or freshness metadata |
+| `suggest_relationships(limit?)` | Propose likely graph edges from shared structure |
+| `merge_memory_nodes(source, target)` | Merge duplicate or overlapping memory nodes |
+
 Followups are stored in `.linked_notes_followups.json` in the vault root. Add that file to `.gitignore` if you do not want reminders committed.
 
 ## Suggested Workflow
@@ -227,6 +236,15 @@ Followups are stored in `.linked_notes_followups.json` in the vault root. Add th
 1. Save a structured session summary
 2. Link it to the project or decision notes it touched
 3. Add or dismiss followups
+
+### Maintenance pass
+
+Run this periodically:
+
+1. `lint_memory_graph()`
+2. `suggest_relationships()`
+3. `merge_memory_nodes(...)` for duplicates
+4. refresh `last_reviewed`, `importance`, and `confidence`
 
 ## Development
 

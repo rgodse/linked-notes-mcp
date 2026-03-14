@@ -32,6 +32,9 @@ Also keep these frontmatter fields current:
 - `project`
 - `status`
 - `summary`
+- `importance`
+- `confidence`
+- `last_reviewed`
 
 ### 3. Save decisions as graph objects
 
@@ -66,3 +69,12 @@ The graph becomes useful when:
 - decision and project notes stay current
 
 If you skip those habits, the system falls back to plain note search.
+
+## Maintenance Habits
+
+Run maintenance regularly:
+
+- lint the graph
+- accept or reject suggested relationships
+- merge duplicate nodes
+- review stale but important notes

@@ -184,6 +184,46 @@ class TestStructuredMemoryTools:
         assert result["status"] == "success"
         assert result["note"]["frontmatter"]["depends_on"] == ["Beta Note"]
 
+    @pytest.mark.asyncio
+    async def test_lint_memory_graph(self, vault):
+        result = json.loads(await handle_tool_call("lint_memory_graph", {}))
+        assert isinstance(result, list)
+        assert any(item["issue_type"] == "missing_entity_type" for item in result)
+
+    @pytest.mark.asyncio
+    async def test_suggest_relationships(self, vault):
+        result = json.loads(await handle_tool_call("suggest_relationships", {"limit": 10}))
+        assert isinstance(result, list)
+
+    @pytest.mark.asyncio
+    async def test_merge_memory_nodes(self, vault):
+        await handle_tool_call(
+            "upsert_memory_node",
+            {
+                "title": "Gateway Memory",
+                "summary": "Primary gateway node",
+                "entity_type": "service",
+            },
+        )
+        await handle_tool_call(
+            "upsert_memory_node",
+            {
+                "title": "Gateway Duplicate",
+                "summary": "Duplicate gateway node",
+                "entity_type": "service",
+            },
+        )
+        result = json.loads(
+            await handle_tool_call(
+                "merge_memory_nodes",
+                {
+                    "source_identifier": "Gateway Duplicate",
+                    "target_identifier": "Gateway Memory",
+                },
+            )
+        )
+        assert result["status"] == "success"
+
 
 # ---------------------------------------------------------------------------
 # get_note_summary

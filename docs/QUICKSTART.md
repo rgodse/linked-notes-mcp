@@ -22,6 +22,7 @@ Build the notes for the agent first:
 
 - keep frontmatter structured
 - use `aliases`, `entity_type`, `project`, `status`, and `summary`
+- add `importance`, `confidence`, and `last_reviewed` for ranking and quality checks
 - use the body for supporting detail, not the primary retrieval key
 
 ## 3. Configure Codex
@@ -71,6 +72,8 @@ Try these prompts:
 
 - "Upsert a memory node for API Gateway with service metadata"
 - "Add a depends_on relationship from API Gateway to Auth Service"
+- "Lint the memory graph and tell me which notes are weak"
+- "Suggest missing relationships"
 - "Get context on API Gateway"
 - "List relationships for API Gateway"
 - "Show graph context around API Gateway"
