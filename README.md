@@ -3,11 +3,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-Graph-first MCP memory for markdown notes. Point it at a folder of markdown files and an MCP client like Codex or Claude can search, traverse, and update a real knowledge graph instead of relying on opaque vector memory.
+`linked-notes-mcp` is a graph-first local memory system for AI agents built on MCP. It stores memory as structured markdown nodes plus typed relationships, so agents can retrieve, update, review, and maintain knowledge as an explicit graph instead of relying only on opaque vector memory.
 
-This vault is meant to be authored primarily for the agent, not for a human reader. Human readability is still useful, but structured frontmatter and explicit relationships should win over prose.
+It is designed for agent-authored memory first: notes are optimized for retrieval, review, and long-term maintenance using frontmatter fields like `entity_type`, `summary`, `status`, `importance`, `confidence`, and `last_reviewed`.
 
-The memory model is domain-agnostic. It can be used for coding work, strategy, operations, research, stakeholders, meetings, and cross-functional programs, not just software repos.
+The model is domain-agnostic and works for technical and non-technical work alike: projects, services, issues, stakeholders, meetings, research, initiatives, and workstreams.
 
 ## Why Graph Memory
 
