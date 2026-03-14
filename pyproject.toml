@@ -31,13 +31,20 @@ dev = [
     "ruff>=0.4",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
 [project.scripts]
 linked-notes-mcp = "linked_notes_mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/linked-notes-mcp"
-Repository = "https://github.com/yourusername/linked-notes-mcp"
-Issues = "https://github.com/yourusername/linked-notes-mcp/issues"
+Homepage = "https://github.com/rgodse/linked-notes-mcp"
+Repository = "https://github.com/rgodse/linked-notes-mcp"
+Issues = "https://github.com/rgodse/linked-notes-mcp/issues"
 
 [build-system]
 requires = ["hatchling"]

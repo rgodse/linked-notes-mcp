@@ -93,7 +93,7 @@ def _extract_excerpt(note: Note, query: str, max_chars: int = 175) -> str:
 
 
 def _followups_path() -> Path:
-    return Path(_graph.vault_path) / ".claude_followups.json"
+    return Path(_graph.vault_path) / ".linked_notes_followups.json"
 
 
 def _load_followups() -> list[dict]:

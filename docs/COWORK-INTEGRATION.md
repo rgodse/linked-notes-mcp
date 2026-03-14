@@ -149,21 +149,21 @@ You return, ask "what's the status?", and Claude has full context instantly.
 - **Storage:** Local filesystem (your machine), not cloud
 - **Format:** Standard markdown with YAML frontmatter - compatible with Obsidian, any text editor
 - **Dependencies:** Python, ~4 small packages
-- **Security:** Notes stay on your machine, nothing sent externally beyond normal Claude conversation
+- **Security:** Notes stay on your machine, nothing sent externally beyond normal MCP client conversation
 
 ## Setup
 
 5 minutes:
-1. `pip install linked-notes-mcp`
-2. Create folder: `mkdir ~/claude-brain`
-3. Add to Claude Desktop config
+1. `git clone https://github.com/rgodse/linked-notes-mcp && cd linked-notes-mcp && uv sync`
+2. Create folder: `mkdir ~/agent-brain`
+3. Add to Codex or Claude Desktop config
 4. Restart Claude Desktop
 
 Full instructions in QUICKSTART.md.
 
 ## Recommended Cowork Instructions
 
-Add to your CLAUDE.md or project instructions:
+Add to your client instructions:
 
 ```
 When working autonomously via Cowork:
