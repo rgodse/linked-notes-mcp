@@ -18,6 +18,14 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from .graph import KnowledgeGraph, Note
+from .ingestion import (
+    accept_extracted_node,
+    ingest_sources,
+    list_ingestion_runs,
+    merge_extracted_node,
+    reject_extracted_node,
+    review_extracted_nodes,
+)
 from .templates import (
     list_templates as get_templates,
     render_template,
@@ -730,6 +738,103 @@ TOOLS = [
             "required": ["title", "raw_text"]
         }
     ),
+    Tool(
+        name="ingest_sources",
+        description="Create a staged ingestion run from local files or inline text and extract candidate memory nodes for review.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "Optional project grouping for extracted candidates"},
+                "mode": {
+                    "type": "string",
+                    "enum": ["stage"],
+                    "default": "stage",
+                    "description": "Ingestion mode. v1 supports staged review only."
+                },
+                "sources": {
+                    "type": "array",
+                    "description": "List of source descriptors to ingest",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "enum": ["file", "text"],
+                                "description": "Source kind"
+                            },
+                            "path": {"type": "string", "description": "Absolute file path for file sources"},
+                            "name": {"type": "string", "description": "Display name for inline text"},
+                            "content": {"type": "string", "description": "Inline text content"},
+                        },
+                        "required": ["type"],
+                    },
+                },
+            },
+            "required": ["sources"]
+        }
+    ),
+    Tool(
+        name="list_ingestion_runs",
+        description="List recent staged ingestion runs and their pending review counts.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "default": 20, "description": "Maximum runs to return"}
+            }
+        }
+    ),
+    Tool(
+        name="review_extracted_nodes",
+        description="Review staged ingestion candidates before they are promoted into the main memory graph.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "Optional ingestion run filter"},
+                "state": {
+                    "type": "string",
+                    "enum": ["pending", "accepted", "rejected", "merged", "all"],
+                    "default": "pending",
+                    "description": "Candidate review state filter"
+                },
+                "limit": {"type": "integer", "default": 20, "description": "Maximum candidates to return"},
+            }
+        }
+    ),
+    Tool(
+        name="accept_extracted_node",
+        description="Accept a staged ingestion candidate and promote it into the memory graph. Clear matches may merge into an existing note.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "candidate_id": {"type": "string", "description": "Candidate ID from review_extracted_nodes"}
+            },
+            "required": ["candidate_id"]
+        }
+    ),
+    Tool(
+        name="reject_extracted_node",
+        description="Reject a staged ingestion candidate and record the reason.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "candidate_id": {"type": "string", "description": "Candidate ID from review_extracted_nodes"},
+                "reason": {"type": "string", "description": "Optional rejection reason"},
+            },
+            "required": ["candidate_id"]
+        }
+    ),
+    Tool(
+        name="merge_extracted_node",
+        description="Merge a staged ingestion candidate into an existing note instead of creating a new one.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "candidate_id": {"type": "string", "description": "Candidate ID from review_extracted_nodes"},
+                "target_identifier": {"type": "string", "description": "Existing note ID or title"},
+            },
+            "required": ["candidate_id", "target_identifier"]
+        }
+    ),
     # ==================== Template Tools ====================
     Tool(
         name="list_templates",
@@ -1431,6 +1536,82 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             },
             indent=2,
         )
+
+    elif name == "ingest_sources":
+        result = ingest_sources(
+            graph=graph,
+            sources=arguments["sources"],
+            project=arguments.get("project"),
+            mode=arguments.get("mode", "stage"),
+        )
+        return json.dumps(result, indent=2)
+
+    elif name == "list_ingestion_runs":
+        runs = list_ingestion_runs(Path(graph.vault_path), arguments.get("limit", 20))
+        return json.dumps(runs, indent=2)
+
+    elif name == "review_extracted_nodes":
+        candidates = review_extracted_nodes(
+            Path(graph.vault_path),
+            run_id=arguments.get("run_id"),
+            state=arguments.get("state", "pending"),
+            limit=arguments.get("limit", 20),
+        )
+        return json.dumps(candidates, indent=2)
+
+    elif name == "accept_extracted_node":
+        try:
+            result = accept_extracted_node(graph, arguments["candidate_id"])
+            note = result["note"]
+            return json.dumps(
+                {
+                    "status": "success",
+                    "action": result["action"],
+                    "candidate_id": result["candidate_id"],
+                    "note": format_note_full(note),
+                },
+                indent=2,
+            )
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    elif name == "reject_extracted_node":
+        try:
+            result = reject_extracted_node(
+                graph,
+                arguments["candidate_id"],
+                arguments.get("reason"),
+            )
+            return json.dumps(
+                {
+                    "status": "success",
+                    "candidate_id": result["candidate_id"],
+                    "review_state": result["status"],
+                    "reason": result.get("reason"),
+                },
+                indent=2,
+            )
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    elif name == "merge_extracted_node":
+        try:
+            result = merge_extracted_node(
+                graph,
+                arguments["candidate_id"],
+                arguments["target_identifier"],
+            )
+            return json.dumps(
+                {
+                    "status": "success",
+                    "action": result["action"],
+                    "candidate_id": result["candidate_id"],
+                    "note": format_note_full(result["note"]),
+                },
+                indent=2,
+            )
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
 
     # ==================== Template Tool Handlers ====================
     elif name == "list_templates":

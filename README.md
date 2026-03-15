@@ -111,6 +111,7 @@ Why these fields matter:
 - typed graph relationships from frontmatter
 - graph traversal and path finding
 - graph-first context retrieval
+- staged seed ingestion for local files and inline text
 - write tools for persistent agent memory
 - Obsidian-compatible markdown folders
 
@@ -322,6 +323,17 @@ The body should still exist, but treat it as supporting detail. The frontmatter 
 | `memory_dashboard(...)` | Compact operational view of weak notes, stale notes, and pending suggestions |
 | `promote_to_memory_node(...)` | Convert raw work output into a structured memory node |
 
+### Ingestion Tools
+
+| Tool | What it is good for |
+|------|----------------------|
+| `ingest_sources(...)` | Stage candidate memory nodes from local files or inline text |
+| `list_ingestion_runs(...)` | Review recent staged ingestion runs |
+| `review_extracted_nodes(...)` | Inspect candidates before promotion |
+| `accept_extracted_node(...)` | Promote a candidate into the graph or merge a clear match |
+| `reject_extracted_node(...)` | Reject a low-value candidate and keep review history |
+| `merge_extracted_node(...)` | Merge a candidate into a specific existing note |
+
 ### Template Coverage
 
 Templates now cover both technical and non-technical work:
@@ -372,11 +384,12 @@ Current limits:
 - it is optimized for durable explicit memory, not full conversational recall
 - graph quality still depends on review and maintenance over time
 - mutation and retrieval behavior are tested, but the project is still evolving quickly
-- the ingestion-first workflow is currently specified in docs and not implemented yet
+- seed ingestion v1 is implemented, but only for staged local file and inline text flows
+- there is not yet a higher-level UX for session-start, session-end, or compact review workflows
 
 Planned next step:
 
-- build staged seed-context ingestion so existing docs, transcripts, and handoff material can become structured memory before long chat history exists
+- improve the UX layer on top of the memory graph so common flows feel like workflows instead of raw tool choreography
 
 ## Next Steps
 
@@ -449,6 +462,7 @@ uv run python scripts/run_linked_notes_mcp.py /path/to/test/vault
 - [Usage Rules](docs/USAGE-RULES.md)
 - [Autonomous Agent Integration](docs/COWORK-INTEGRATION.md)
 - [Seed Context Ingestion Spec](docs/INGESTION-SPEC.md)
+- [UX Roadmap](docs/UX-ROADMAP.md)
 
 ## Comparison with Memory Styles
 

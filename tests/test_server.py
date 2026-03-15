@@ -346,6 +346,141 @@ class TestStructuredMemoryTools:
         assert result["note"]["aliases"] == ["Q Planning"]
 
 
+class TestIngestionTools:
+    @pytest.mark.asyncio
+    async def test_ingest_sources_creates_run_and_candidate(self, vault):
+        result = json.loads(
+            await handle_tool_call(
+                "ingest_sources",
+                {
+                    "project": "seed-test",
+                    "sources": [
+                        {
+                            "type": "text",
+                            "name": "handoff-notes",
+                            "content": "# Handoff Notes\nThis service blocks deployment and needs owner followup.",
+                        }
+                    ],
+                },
+            )
+        )
+        assert "run_id" in result
+        assert result["artifacts"] == 1
+        assert result["candidates_created"] == 1
+
+        runs = json.loads(await handle_tool_call("list_ingestion_runs", {}))
+        assert any(run["id"] == result["run_id"] for run in runs)
+
+        candidates = json.loads(
+            await handle_tool_call("review_extracted_nodes", {"run_id": result["run_id"]})
+        )
+        assert len(candidates) == 1
+        assert candidates[0]["title"] == "Handoff Notes"
+        assert candidates[0]["review_state"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_accept_extracted_node_creates_memory_node(self, vault):
+        run = json.loads(
+            await handle_tool_call(
+                "ingest_sources",
+                {
+                    "project": "seed-test",
+                    "sources": [
+                        {
+                            "type": "text",
+                            "name": "process-context",
+                            "content": "# Quarterly Planning\nWorkstream for quarterly planning and owner coordination.",
+                        }
+                    ],
+                },
+            )
+        )
+        candidates = json.loads(
+            await handle_tool_call("review_extracted_nodes", {"run_id": run["run_id"]})
+        )
+        candidate_id = candidates[0]["id"]
+
+        result = json.loads(
+            await handle_tool_call("accept_extracted_node", {"candidate_id": candidate_id})
+        )
+        assert result["status"] == "success"
+        assert result["note"]["title"] == "Quarterly Planning"
+
+        accepted = json.loads(
+            await handle_tool_call(
+                "review_extracted_nodes",
+                {"run_id": run["run_id"], "state": "accepted"},
+            )
+        )
+        assert any(item["id"] == candidate_id for item in accepted)
+
+    @pytest.mark.asyncio
+    async def test_reject_extracted_node_marks_candidate(self, vault):
+        run = json.loads(
+            await handle_tool_call(
+                "ingest_sources",
+                {
+                    "sources": [
+                        {
+                            "type": "text",
+                            "name": "scratch",
+                            "content": "Loose scratch content without durable value.",
+                        }
+                    ],
+                },
+            )
+        )
+        candidates = json.loads(
+            await handle_tool_call("review_extracted_nodes", {"run_id": run["run_id"]})
+        )
+        candidate_id = candidates[0]["id"]
+
+        result = json.loads(
+            await handle_tool_call(
+                "reject_extracted_node",
+                {"candidate_id": candidate_id, "reason": "too vague"},
+            )
+        )
+        assert result["status"] == "success"
+
+        rejected = json.loads(
+            await handle_tool_call(
+                "review_extracted_nodes",
+                {"run_id": run["run_id"], "state": "rejected"},
+            )
+        )
+        assert any(item["id"] == candidate_id for item in rejected)
+
+    @pytest.mark.asyncio
+    async def test_accept_extracted_node_merges_into_existing_note(self, vault):
+        run = json.loads(
+            await handle_tool_call(
+                "ingest_sources",
+                {
+                    "sources": [
+                        {
+                            "type": "text",
+                            "name": "alpha-refresh",
+                            "content": "# Alpha Note\nThis is refreshed project context for Alpha Note.",
+                        }
+                    ],
+                },
+            )
+        )
+        candidates = json.loads(
+            await handle_tool_call("review_extracted_nodes", {"run_id": run["run_id"]})
+        )
+        candidate = candidates[0]
+        assert candidate["dedupe"]["matched_note_id"] == "alpha"
+
+        result = json.loads(
+            await handle_tool_call("accept_extracted_node", {"candidate_id": candidate["id"]})
+        )
+        assert result["status"] == "success"
+        assert result["action"] == "merged"
+        assert result["note"]["id"] == "alpha"
+
+
 # ---------------------------------------------------------------------------
 # get_note_summary
 # ---------------------------------------------------------------------------
