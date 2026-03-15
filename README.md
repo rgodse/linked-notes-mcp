@@ -11,6 +11,14 @@ It is designed for agent-authored memory first: notes are optimized for retrieva
 
 The model is domain-agnostic and works for technical and non-technical work alike: projects, repositories, services, issues, stakeholders, meetings, research, initiatives, and workstreams.
 
+## At A Glance
+
+- local-first markdown memory for AI-assisted work
+- graph-shaped retrieval over notes, links, and typed relationships
+- human-inspectable and editable instead of opaque vector memory
+- MCP server for agents plus a local browser visualizer for humans
+- especially useful when you keep re-explaining project context across sessions
+
 ## Why I Built This
 
 I built this because I kept having to re-explain project context to my AI agent.
@@ -18,6 +26,30 @@ I built this because I kept having to re-explain project context to my AI agent.
 Chat history was too fragile, and plain notes were too flat to preserve decisions, dependencies, and work relationships across sessions. I wanted a local, inspectable memory layer that both humans and agents could reuse over time.
 
 That pushed the design toward markdown as the source of truth, graph structure for context, and maintenance workflows to keep the memory usable instead of letting it collapse into note sprawl.
+
+## Quick Start
+
+### Run the MCP server
+
+```bash
+uvx --from git+https://github.com/rgodse/linked-notes-mcp linked-notes-mcp /path/to/your/notes
+```
+
+### Run the local visualizer
+
+```bash
+git clone https://github.com/rgodse/linked-notes-mcp
+cd linked-notes-mcp
+uv sync
+uv run python scripts/run_linked_notes_ui.py /path/to/your/notes
+```
+
+Then open the printed `http://127.0.0.1:8765` URL in your browser.
+
+Status:
+
+- MCP layer is usable today for structured local memory workflows
+- local visualizer is usable now, but still an early workbench rather than a polished product UI
 
 ## Thesis
 
