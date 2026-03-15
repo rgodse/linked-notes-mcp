@@ -3,13 +3,42 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-`linked-notes-mcp` is a graph-first local memory system for AI agents built on MCP. It gives assistants a writable markdown knowledge graph they can inspect, update, review, and maintain over time instead of pushing project memory into opaque chat history or vector stores.
+`linked-notes-mcp` is a graph-first local memory layer for AI agents built on MCP. It keeps markdown notes structured, retrievable, and maintainable so local agent memory does not collapse into an unstructured pile of `.md` files.
 
 The core idea is simple: agent memory should be local, editable, and structurally explicit. Notes live on disk as markdown. Links and frontmatter become graph edges. Retrieval can use both text and graph structure. Humans can inspect the result at any time.
 
 It is designed for agent-authored memory first: notes are optimized for retrieval, review, and long-term maintenance using frontmatter fields like `entity_type`, `summary`, `status`, `importance`, `confidence`, and `last_reviewed`.
 
 The model is domain-agnostic and works for technical and non-technical work alike: projects, repositories, services, issues, stakeholders, meetings, research, initiatives, and workstreams.
+
+## Thesis
+
+Most local note-based memory fails for agents for the same reason it fails for humans at scale: the notes exist, but the structure does not.
+
+`linked-notes-mcp` is built around a narrower claim:
+
+- keep the source of truth local
+- keep the memory human-readable
+- keep the structure explicit enough for agents to retrieve and maintain it
+
+This is not a cognition stack. It is the durable memory layer underneath one.
+
+## Who This Is For
+
+This project is a good fit if you want:
+
+- local-first agent memory
+- durable project and decision context across sessions
+- a shared memory format that humans can inspect and edit
+- structured notes instead of free-form markdown sprawl
+- compatibility across MCP clients and agents
+
+It is a poor fit if you want:
+
+- a hosted memory product
+- passive memory of every conversation without curation
+- a replacement for short-term working context
+- a generic database for arbitrary high-volume event logging
 
 ## Why This Exists
 
@@ -97,6 +126,41 @@ That matters because it means:
 - decisions and dependencies become explicit instead of implied
 - memory can be reviewed and cleaned up with dashboard and lint tools
 - the same vault can be used across Claude, Codex, and other MCP clients
+
+## Practical Use Cases
+
+### Project continuity
+
+Start a new session by asking for context on a project. Instead of re-explaining the entire background, the agent can pull the project note, nearby services, recent decisions, and open followups from the graph.
+
+### Decision archaeology
+
+When someone asks "why did we choose this?", the graph can connect a project or service node to the decision note that justified it, and then to supporting research or meetings.
+
+### Blocker tracing
+
+When work is stuck, graph retrieval can follow `blocked_by`, `blocks`, and `depends_on` relationships instead of relying on raw keyword matches.
+
+### Handoffs and onboarding
+
+A new agent or teammate can start from a project node and expand outward through services, issues, decisions, and stakeholders instead of reading a flat directory of notes.
+
+### Seeded memory plus ongoing enrichment
+
+The long-term direction is to ingest source material up front, stage structured memory candidates, and then let normal conversation flows keep enriching the accepted graph over time.
+
+## Why Graph Retrieval Helps
+
+Plain search tells you which notes mention a word.
+
+Graph retrieval helps answer questions like:
+
+- what is blocking this work
+- what depends on this service
+- which decision affects this project
+- what context should I read next
+
+That is useful because many real work questions are about relationships, not documents in isolation.
 
 ## Installation
 
@@ -297,6 +361,22 @@ In practice:
 - use `research`, `initiative`, `workstream`, and `stakeholder` for broader operating context
 
 Followups are stored in `.linked_notes_followups.json` in the vault root. Add that file to `.gitignore` if you do not want reminders committed.
+
+## Known Limitations
+
+This project is intentionally opinionated and still early.
+
+Current limits:
+
+- it works best when notes use structured frontmatter consistently
+- it is optimized for durable explicit memory, not full conversational recall
+- graph quality still depends on review and maintenance over time
+- mutation and retrieval behavior are tested, but the project is still evolving quickly
+- the ingestion-first workflow is currently specified in docs and not implemented yet
+
+Planned next step:
+
+- build staged seed-context ingestion so existing docs, transcripts, and handoff material can become structured memory before long chat history exists
 
 ## Suggested Workflow
 

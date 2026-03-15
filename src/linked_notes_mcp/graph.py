@@ -705,6 +705,34 @@ class KnowledgeGraph:
                     source_field=relationship.source_field,
                 )
 
+        # Restoring the node removes all inbound edges as well, so rebuild any
+        # existing notes that still point at the updated note.
+        for source_id, source_note in self.notes.items():
+            if source_id == updated_note.id:
+                continue
+
+            for link in source_note.outgoing_links:
+                if link.target == updated_note.id:
+                    self._add_edge(
+                        source_id,
+                        updated_note.id,
+                        relationship_type=link.link_type,
+                        evidence="inline_link",
+                        display_text=link.display_text,
+                        line_number=link.line_number,
+                    )
+
+            for relationship in source_note.explicit_relationships:
+                target_id = self._resolve_relationship_target(relationship)
+                if target_id == updated_note.id:
+                    self._add_edge(
+                        source_id,
+                        updated_note.id,
+                        relationship_type=relationship.relation_type,
+                        evidence="frontmatter",
+                        source_field=relationship.source_field,
+                    )
+
         return updated_note
 
     def create_note(

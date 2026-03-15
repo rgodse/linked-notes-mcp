@@ -250,6 +250,17 @@ class TestWriteOperations:
         assert "Completely new content" in note.content
         assert "modified" in note.frontmatter
 
+    def test_update_note_preserves_incoming_links(self, sample_vault):
+        graph = KnowledgeGraph(sample_vault)
+
+        links_before = graph.get_links("note-b", "incoming")
+        assert "note-a" in links_before["incoming"]
+
+        graph.update_note(identifier="note-b", content="Updated body")
+
+        links_after = graph.get_links("note-b", "incoming")
+        assert "note-a" in links_after["incoming"]
+
     def test_update_note_title(self, sample_vault):
         graph = KnowledgeGraph(sample_vault)
 
