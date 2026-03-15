@@ -566,6 +566,26 @@ For repo and workflow demos, the visualizer is especially useful because it make
 
 linked-notes-mcp is for the case where you want agent memory to be a real graph you can inspect and control, not just a retrieval backend.
 
+## Comparison with Adjacent Tools
+
+This project is not the only tool in the persistent-memory or MCP-notes space. The difference is the combination of design choices:
+
+- markdown vault as the source of truth
+- typed graph relationships from frontmatter and links
+- explicit maintenance and review workflows
+- local-first browser visualizer over the same graph
+
+Some adjacent tools:
+
+| Project | Primary model | Main emphasis | How `linked-notes-mcp` differs |
+|---------|---------------|---------------|---------------------------------|
+| [Anthropic Memory MCP](https://modelcontextprotocol.io/examples) | local knowledge graph with entities, relations, and observations | general persistent memory for MCP clients | `linked-notes-mcp` is markdown-vault-first and optimized for human-editable durable notes rather than a standalone entity store |
+| [Vault MCP / Obsidian MCP Plugin](https://github.com/jlevere/obsidian-mcp-plugin) | Obsidian vault access through MCP | exposing vault files and structured note operations to LLMs | `linked-notes-mcp` is more opinionated about graph shape, typed relationships, maintenance, and agent-first memory workflows |
+| [knowledgegraph-mcp](https://github.com/n-r-w/knowledgegraph-mcp) | knowledge graph memory with SQLite/PostgreSQL backends | persistent graph memory with fuzzy search and multiple storage backends | `linked-notes-mcp` keeps markdown as the canonical layer and leans harder into inspectability, staged review, and human-maintained graph quality |
+| [RepoMemory](https://mcpmarket.com/server/repomemory) | repo-aware memory graph backed by SQLite | continuity for coding agents within a repository | `linked-notes-mcp` is broader than repo memory and treats repo intelligence as one future producer that writes into a general local memory graph |
+
+So the claim here is not "nothing else exists." The claim is that `linked-notes-mcp` combines local markdown durability, graph-native retrieval, maintenance workflows, and a local visual workbench in one coherent memory model.
+
 ## License
 
 MIT License. See [LICENSE](LICENSE).
