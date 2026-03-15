@@ -9,10 +9,11 @@ Uses NetworkX for graph operations. Supports:
 - Graph-first context retrieval
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any
 
 import networkx as nx
 import yaml
@@ -84,7 +85,7 @@ class TraversalResult:
 class KnowledgeGraph:
     """A knowledge graph built from markdown notes."""
 
-    def __init__(self, vault_path: Optional[Path] = None):
+    def __init__(self, vault_path: Path | None = None):
         self.vault_path = vault_path
         self.graph = nx.DiGraph()
         self.notes: dict[str, Note] = {}
@@ -95,7 +96,7 @@ class KnowledgeGraph:
         if vault_path:
             self.rebuild()
 
-    def rebuild(self, vault_path: Optional[Path] = None) -> int:
+    def rebuild(self, vault_path: Path | None = None) -> int:
         """Rebuild the graph from the vault directory."""
 
         if vault_path:
@@ -121,28 +122,8 @@ class KnowledgeGraph:
             except Exception as exc:
                 print(f"Warning: Failed to parse {md_file}: {exc}")
 
-        for note_id, note in self.notes.items():
-            for link in note.outgoing_links:
-                if link.target in self.notes:
-                    self._add_edge(
-                        note_id,
-                        link.target,
-                        relationship_type=link.link_type,
-                        evidence="inline_link",
-                        display_text=link.display_text,
-                        line_number=link.line_number,
-                    )
-
-            for relationship in note.explicit_relationships:
-                target_id = self._resolve_relationship_target(relationship)
-                if target_id is not None:
-                    self._add_edge(
-                        note_id,
-                        target_id,
-                        relationship_type=relationship.relation_type,
-                        evidence="frontmatter",
-                        source_field=relationship.source_field,
-                    )
+        for note in self.notes.values():
+            self._index_note_edges(note)
 
         return len(self.notes)
 
@@ -155,7 +136,7 @@ class KnowledgeGraph:
             elif is_markdown_file(item):
                 yield item
 
-    def _resolve_note_id(self, identifier: str) -> Optional[str]:
+    def _resolve_note_id(self, identifier: str) -> str | None:
         """Resolve a note ID or title to a note ID."""
 
         normalized = normalize_id(identifier)
@@ -191,7 +172,7 @@ class KnowledgeGraph:
         for tag in note.tags:
             self._tag_index.setdefault(tag, set()).add(note.id)
 
-    def _resolve_relationship_target(self, relationship: Relationship) -> Optional[str]:
+    def _resolve_relationship_target(self, relationship: Relationship) -> str | None:
         """Resolve a relationship target by title first, then by normalized ID."""
 
         resolved = self._resolve_note_id(relationship.raw_target)
@@ -200,6 +181,39 @@ class KnowledgeGraph:
         if relationship.target in self.notes:
             return relationship.target
         return None
+
+    def _index_note_edges(self, note: Note) -> None:
+        """Index a note's outgoing links and typed relationships."""
+
+        for link in note.outgoing_links:
+            if link.target in self.notes:
+                self._add_edge(
+                    note.id,
+                    link.target,
+                    relationship_type=link.link_type,
+                    evidence="inline_link",
+                    display_text=link.display_text,
+                    line_number=link.line_number,
+                )
+
+        for relationship in note.explicit_relationships:
+            target_id = self._resolve_relationship_target(relationship)
+            if target_id is not None:
+                self._add_edge(
+                    note.id,
+                    target_id,
+                    relationship_type=relationship.relation_type,
+                    evidence="frontmatter",
+                    source_field=relationship.source_field,
+                )
+
+    def _parse_add_and_index(self, path: Path) -> Note:
+        """Parse a note from disk, register it, and index its outgoing edges."""
+
+        note = parse_note(path)
+        self._add_note(note)
+        self._index_note_edges(note)
+        return note
 
     def _add_edge(
         self,
@@ -227,7 +241,7 @@ class KnowledgeGraph:
             relationships=[{"type": relationship_type, **metadata}],
         )
 
-    def get_note(self, identifier: str) -> Optional[Note]:
+    def get_note(self, identifier: str) -> Note | None:
         """Get a note by ID or title."""
 
         resolved = self._resolve_note_id(identifier)
@@ -253,7 +267,7 @@ class KnowledgeGraph:
         self,
         identifier: str,
         direction: str = "both",
-        relation_type: Optional[str] = None,
+        relation_type: str | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
         """Return typed relationship metadata for a note."""
 
@@ -281,7 +295,7 @@ class KnowledgeGraph:
         self,
         source: str,
         target: str,
-        relation_type: Optional[str] = None,
+        relation_type: str | None = None,
     ) -> list[dict[str, Any]]:
         """Expand edge metadata into relationship records."""
 
@@ -305,7 +319,7 @@ class KnowledgeGraph:
         start_id: str,
         depth: int = 2,
         direction: str = "both",
-        relation_types: Optional[list[str]] = None,
+        relation_types: list[str] | None = None,
     ) -> TraversalResult:
         """Traverse the graph from a starting note."""
 
@@ -396,7 +410,7 @@ class KnowledgeGraph:
 
         return score
 
-    def find_path(self, start_id: str, end_id: str) -> Optional[list[str]]:
+    def find_path(self, start_id: str, end_id: str) -> list[str] | None:
         """Find shortest path between two notes."""
 
         start = self._resolve_note_id(start_id)
@@ -410,7 +424,7 @@ class KnowledgeGraph:
         except nx.NetworkXNoPath:
             return None
 
-    def get_path_details(self, start_id: str, end_id: str) -> Optional[list[dict[str, Any]]]:
+    def get_path_details(self, start_id: str, end_id: str) -> list[dict[str, Any]] | None:
         """Return a path with relationship metadata on each hop."""
 
         path = self.find_path(start_id, end_id)
@@ -492,7 +506,7 @@ class KnowledgeGraph:
         self,
         identifier: str,
         depth: int = 2,
-        relation_types: Optional[list[str]] = None,
+        relation_types: list[str] | None = None,
         limit: int = 12,
     ) -> dict[str, Any]:
         """Return graph-first context centered on a note."""
@@ -511,7 +525,12 @@ class KnowledgeGraph:
         for node_id, distance in sorted(lengths.items(), key=lambda item: (item[1], item[0])):
             if node_id == resolved:
                 continue
-            relationship_counts = self._relationship_type_counts_between(resolved, node_id, depth, allowed)
+            relationship_counts = self._relationship_type_counts_between(
+                resolved,
+                node_id,
+                depth,
+                allowed,
+            )
             if allowed and not relationship_counts:
                 continue
             note = self.notes[node_id]
@@ -650,7 +669,7 @@ class KnowledgeGraph:
         self,
         title: str,
         tags: list[str],
-        extra: Optional[dict] = None,
+        extra: dict | None = None,
     ) -> str:
         """Generate YAML frontmatter string."""
 
@@ -680,30 +699,7 @@ class KnowledgeGraph:
             if not self._tag_index[tag]:
                 del self._tag_index[tag]
 
-        updated_note = parse_note(old_note.path)
-        self._add_note(updated_note)
-
-        for link in updated_note.outgoing_links:
-            if link.target in self.notes:
-                self._add_edge(
-                    updated_note.id,
-                    link.target,
-                    relationship_type=link.link_type,
-                    evidence="inline_link",
-                    display_text=link.display_text,
-                    line_number=link.line_number,
-                )
-
-        for relationship in updated_note.explicit_relationships:
-            target_id = self._resolve_relationship_target(relationship)
-            if target_id is not None:
-                self._add_edge(
-                    updated_note.id,
-                    target_id,
-                    relationship_type=relationship.relation_type,
-                    evidence="frontmatter",
-                    source_field=relationship.source_field,
-                )
+        updated_note = self._parse_add_and_index(old_note.path)
 
         # Restoring the node removes all inbound edges as well, so rebuild any
         # existing notes that still point at the updated note.
@@ -739,8 +735,8 @@ class KnowledgeGraph:
         self,
         title: str,
         content: str,
-        tags: Optional[list[str]] = None,
-        filename: Optional[str] = None,
+        tags: list[str] | None = None,
+        filename: str | None = None,
     ) -> Note:
         """Create a new note in the vault."""
 
@@ -757,39 +753,14 @@ class KnowledgeGraph:
         full_content = self._generate_frontmatter(title, tags_lower) + content
         file_path = Path(self.vault_path) / f"{filename}.md"
         file_path.write_text(full_content, encoding="utf-8")
-        note = parse_note(file_path)
-        self._add_note(note)
-
-        for link in note.outgoing_links:
-            if link.target in self.notes:
-                self._add_edge(
-                    note.id,
-                    link.target,
-                    relationship_type=link.link_type,
-                    evidence="inline_link",
-                    display_text=link.display_text,
-                    line_number=link.line_number,
-                )
-
-        for relationship in note.explicit_relationships:
-            target_id = self._resolve_relationship_target(relationship)
-            if target_id is not None:
-                self._add_edge(
-                    note.id,
-                    target_id,
-                    relationship_type=relationship.relation_type,
-                    evidence="frontmatter",
-                    source_field=relationship.source_field,
-                )
-
-        return note
+        return self._parse_add_and_index(file_path)
 
     def update_note(
         self,
         identifier: str,
-        content: Optional[str] = None,
-        title: Optional[str] = None,
-        tags: Optional[list[str]] = None,
+        content: str | None = None,
+        title: str | None = None,
+        tags: list[str] | None = None,
         append: bool = False,
     ) -> Note:
         """Update an existing note."""
@@ -822,13 +793,13 @@ class KnowledgeGraph:
         title: str,
         summary: str,
         entity_type: str,
-        project: Optional[str] = None,
-        status: Optional[str] = None,
-        aliases: Optional[list[str]] = None,
-        tags: Optional[list[str]] = None,
-        relationships: Optional[list[dict[str, str]]] = None,
-        body: Optional[str] = None,
-        filename: Optional[str] = None,
+        project: str | None = None,
+        status: str | None = None,
+        aliases: list[str] | None = None,
+        tags: list[str] | None = None,
+        relationships: list[dict[str, str]] | None = None,
+        body: str | None = None,
+        filename: str | None = None,
     ) -> Note:
         """Create or update a structured memory node optimized for agent retrieval."""
 
@@ -854,32 +825,14 @@ class KnowledgeGraph:
                 extra["status"] = status
             extra.update(relationship_fields)
             content_body = body if body is not None else summary
-            frontmatter = self._generate_frontmatter(title, [t.lower() for t in (tags or [])], extra)
+            frontmatter = self._generate_frontmatter(
+                title,
+                [t.lower() for t in (tags or [])],
+                extra,
+            )
             file_path = Path(self.vault_path) / f"{normalize_id(filename or title)}.md"
             file_path.write_text(frontmatter + content_body, encoding="utf-8")
-            note = parse_note(file_path)
-            self._add_note(note)
-            for link in note.outgoing_links:
-                if link.target in self.notes:
-                    self._add_edge(
-                        note.id,
-                        link.target,
-                        relationship_type=link.link_type,
-                        evidence="inline_link",
-                        display_text=link.display_text,
-                        line_number=link.line_number,
-                    )
-            for relationship in note.explicit_relationships:
-                target_id = self._resolve_relationship_target(relationship)
-                if target_id is not None:
-                    self._add_edge(
-                        note.id,
-                        target_id,
-                        relationship_type=relationship.relation_type,
-                        evidence="frontmatter",
-                        source_field=relationship.source_field,
-                    )
-            return note
+            return self._parse_add_and_index(file_path)
 
         frontmatter = existing.frontmatter.copy()
         frontmatter["title"] = title
@@ -908,9 +861,9 @@ class KnowledgeGraph:
     def update_relationships(
         self,
         identifier: str,
-        add: Optional[list[dict[str, str]]] = None,
-        remove: Optional[list[dict[str, str]]] = None,
-        replace: Optional[list[dict[str, str]]] = None,
+        add: list[dict[str, str]] | None = None,
+        remove: list[dict[str, str]] | None = None,
+        replace: list[dict[str, str]] | None = None,
     ) -> Note:
         """Mutate a note's typed frontmatter relationships."""
 
@@ -965,18 +918,41 @@ class KnowledgeGraph:
         for note in self.notes.values():
             frontmatter = note.frontmatter
             if not frontmatter.get("entity_type"):
-                issues.append(LintIssue(note.id, "warning", "missing_entity_type", "Missing entity_type"))
+                issues.append(
+                    LintIssue(
+                        note.id,
+                        "warning",
+                        "missing_entity_type",
+                        "Missing entity_type",
+                    )
+                )
             if not frontmatter.get("summary"):
-                issues.append(LintIssue(note.id, "warning", "missing_summary", "Missing summary"))
+                issues.append(
+                    LintIssue(note.id, "warning", "missing_summary", "Missing summary")
+                )
             if self.graph.in_degree(note.id) + self.graph.out_degree(note.id) == 0:
                 issues.append(LintIssue(note.id, "info", "orphan", "No graph connections"))
             if not note.aliases:
-                issues.append(LintIssue(note.id, "info", "missing_aliases", "No aliases configured"))
+                issues.append(
+                    LintIssue(note.id, "info", "missing_aliases", "No aliases configured")
+                )
             if frontmatter.get("confidence") is None:
-                issues.append(LintIssue(note.id, "info", "missing_confidence", "Missing confidence score"))
+                issues.append(
+                    LintIssue(
+                        note.id,
+                        "info",
+                        "missing_confidence",
+                        "Missing confidence score",
+                    )
+                )
             if not frontmatter.get("last_reviewed"):
                 issues.append(
-                    LintIssue(note.id, "info", "missing_last_reviewed", "Missing last_reviewed timestamp")
+                    LintIssue(
+                        note.id,
+                        "info",
+                        "missing_last_reviewed",
+                        "Missing last_reviewed timestamp",
+                    )
                 )
         return issues
 
@@ -989,7 +965,10 @@ class KnowledgeGraph:
             source = self.notes[source_id]
             for target_id in note_ids[index + 1 :]:
                 target = self.notes[target_id]
-                if self.graph.has_edge(source_id, target_id) or self.graph.has_edge(target_id, source_id):
+                if (
+                    self.graph.has_edge(source_id, target_id)
+                    or self.graph.has_edge(target_id, source_id)
+                ):
                     continue
 
                 score = 0
@@ -1068,7 +1047,11 @@ class KnowledgeGraph:
 
         merged_body = target.body
         if source.body and source.body not in merged_body:
-            merged_body = merged_body.rstrip() + f"\n\n## Merged Context From {source.title}\n\n" + source.body
+            merged_body = (
+                merged_body.rstrip()
+                + f"\n\n## Merged Context From {source.title}\n\n"
+                + source.body
+            )
 
         target.path.write_text(
             f"---\n{yaml.dump(target_frontmatter, default_flow_style=False)}---\n\n{merged_body}",
@@ -1080,7 +1063,10 @@ class KnowledgeGraph:
             source_frontmatter["status"] = "merged"
             source_frontmatter["merged_into"] = updated_target.title
             source.path.write_text(
-                f"---\n{yaml.dump(source_frontmatter, default_flow_style=False)}---\n\nMerged into [[{updated_target.title}]].",
+                (
+                    f"---\n{yaml.dump(source_frontmatter, default_flow_style=False)}---\n\n"
+                    f"Merged into [[{updated_target.title}]]."
+                ),
                 encoding="utf-8",
             )
             self._reload_note_from_disk(source)
@@ -1089,7 +1075,7 @@ class KnowledgeGraph:
 
         return updated_target
 
-    def get_note_health(self, identifier: str) -> Optional[NoteHealth]:
+    def get_note_health(self, identifier: str) -> NoteHealth | None:
         """Compute health for a single note."""
 
         note = self.get_note(identifier)

@@ -10,14 +10,20 @@ This module implements a staged ingestion flow:
 from __future__ import annotations
 
 import hashlib
-import json
-import re
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
+from .common import (
+    candidate_recommendation_label,
+    infer_entity_type,
+    infer_summary,
+    load_json_file,
+    normalize_space,
+    save_json_file,
+)
 from .graph import KnowledgeGraph, Note
 from .parser import (
     extract_aliases,
@@ -36,14 +42,14 @@ class IngestionArtifact:
     source_type: str
     source_ref: str
     checksum: str
-    project: Optional[str]
+    project: str | None
     created_at: str
 
 
 @dataclass
 class IngestionRun:
     id: str
-    project: Optional[str]
+    project: str | None
     mode: str
     created_at: str
     artifacts: int
@@ -62,8 +68,8 @@ class IngestionCandidate:
     title: str
     aliases: list[str]
     summary: str
-    project: Optional[str]
-    status: Optional[str]
+    project: str | None
+    status: str | None
     tags: list[str]
     relationships: list[dict[str, str]]
     body: str
@@ -71,16 +77,16 @@ class IngestionCandidate:
     confidence: float
     dedupe: dict[str, Any]
     created_at: str
-    review_reason: Optional[str] = None
-    promoted_note_id: Optional[str] = None
+    review_reason: str | None = None
+    promoted_note_id: str | None = None
 
 
 @dataclass
 class IngestionReview:
     candidate_id: str
     action: str
-    reason: Optional[str]
-    target_note_id: Optional[str]
+    reason: str | None
+    target_note_id: str | None
     created_at: str
 
 
@@ -97,16 +103,11 @@ def _ingestion_reviews_path(vault_path: Path) -> Path:
 
 
 def _load_json(path: Path, default: Any) -> Any:
-    if not path.exists():
-        return default
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return default
+    return load_json_file(path, default)
 
 
 def _save_json(path: Path, data: Any) -> None:
-    path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    save_json_file(path, data, sort_keys=True)
 
 
 def _load_runs(vault_path: Path) -> list[dict[str, Any]]:
@@ -141,9 +142,9 @@ def list_ingestion_runs(vault_path: Path, limit: int = 20) -> list[dict[str, Any
 
 def review_extracted_nodes(
     vault_path: Path,
-    run_id: Optional[str] = None,
+    run_id: str | None = None,
     state: str = "pending",
-    recommendation: Optional[str] = None,
+    recommendation: str | None = None,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     candidates = _load_candidates(vault_path)
@@ -163,7 +164,7 @@ def review_extracted_nodes(
 def ingest_sources(
     graph: KnowledgeGraph,
     sources: list[dict[str, Any]],
-    project: Optional[str] = None,
+    project: str | None = None,
     mode: str = "stage",
 ) -> dict[str, Any]:
     """Create an ingestion run and stage extracted candidates."""
@@ -260,7 +261,7 @@ def accept_extracted_node(graph: KnowledgeGraph, candidate_id: str) -> dict[str,
 def reject_extracted_node(
     graph: KnowledgeGraph,
     candidate_id: str,
-    reason: Optional[str] = None,
+    reason: str | None = None,
 ) -> dict[str, Any]:
     """Reject a staged candidate."""
 
@@ -288,8 +289,8 @@ def reject_extracted_node(
 def accept_all_candidates(
     graph: KnowledgeGraph,
     run_id: str,
-    recommendation: Optional[str] = None,
-    limit: Optional[int] = None,
+    recommendation: str | None = None,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Bulk-accept pending candidates for a run."""
 
@@ -317,9 +318,9 @@ def accept_all_candidates(
 def reject_all_candidates(
     graph: KnowledgeGraph,
     run_id: str,
-    recommendation: Optional[str] = None,
-    reason: Optional[str] = None,
-    limit: Optional[int] = None,
+    recommendation: str | None = None,
+    reason: str | None = None,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Bulk-reject pending candidates for a run."""
 
@@ -396,7 +397,10 @@ def merge_extracted_node(
     return {"action": "merged", "note": updated, "candidate_id": candidate_id}
 
 
-def _find_candidate(graph: KnowledgeGraph, candidate_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _find_candidate(
+    graph: KnowledgeGraph,
+    candidate_id: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if graph.vault_path is None:
         raise ValueError("Graph has no vault path configured")
     candidates = _load_candidates(Path(graph.vault_path))
@@ -445,7 +449,7 @@ def _extract_source(
     graph: KnowledgeGraph,
     run_id: str,
     source: dict[str, Any],
-    project: Optional[str],
+    project: str | None,
     created_at: str,
 ) -> tuple[IngestionArtifact, list[IngestionCandidate]]:
     source_type = source.get("type")
@@ -489,13 +493,16 @@ def _candidate_from_content(
     artifact: IngestionArtifact,
     content: str,
     display_name: str,
-    project: Optional[str],
+    project: str | None,
     created_at: str,
 ) -> IngestionCandidate:
     frontmatter, body = parse_frontmatter(content)
     title = extract_title(content, frontmatter, display_name)
-    summary = str(frontmatter.get("summary") or _infer_summary(body or content))
-    entity_type = str(frontmatter.get("entity_type") or _infer_entity_type(body or content))
+    summary = infer_summary(body or content, explicit_summary=frontmatter.get("summary"))
+    entity_type = infer_entity_type(
+        body or content,
+        explicit_entity_type=frontmatter.get("entity_type"),
+    )
     status = frontmatter.get("status")
     aliases = extract_aliases(frontmatter)
     tags = extract_tags(frontmatter)
@@ -508,7 +515,7 @@ def _candidate_from_content(
         for rel in extract_relationships(frontmatter)
     ]
     confidence = 0.85 if frontmatter else 0.65
-    evidence_text = _normalize_space((body or content).strip())
+    evidence_text = normalize_space((body or content).strip())
     evidence = [
         {
             "artifact_id": artifact.id,
@@ -554,7 +561,7 @@ def _expand_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for source in sources:
         source_type = source.get("type")
         if source_type in {"file", "text"}:
-            key = json.dumps(source, sort_keys=True)
+            key = str(sorted(source.items()))
             if key not in seen:
                 seen.add(key)
                 expanded.append(source)
@@ -578,12 +585,18 @@ def _expand_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 if include_extensions and path.suffix.lower() not in include_extensions:
                     continue
                 relative = str(path.relative_to(directory))
-                if include_patterns and not any(path.match(pattern) or relative_match(relative, pattern) for pattern in include_patterns):
+                if include_patterns and not any(
+                    path.match(pattern) or relative_match(relative, pattern)
+                    for pattern in include_patterns
+                ):
                     continue
-                if exclude_patterns and any(path.match(pattern) or relative_match(relative, pattern) for pattern in exclude_patterns):
+                if exclude_patterns and any(
+                    path.match(pattern) or relative_match(relative, pattern)
+                    for pattern in exclude_patterns
+                ):
                     continue
                 file_source = {"type": "file", "path": str(path)}
-                key = json.dumps(file_source, sort_keys=True)
+                key = str(sorted(file_source.items()))
                 if key not in seen:
                     seen.add(key)
                     expanded.append(file_source)
@@ -595,7 +608,7 @@ def _expand_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 if not path.is_file():
                     continue
                 file_source = {"type": "file", "path": str(path.resolve())}
-                key = json.dumps(file_source, sort_keys=True)
+                key = str(sorted(file_source.items()))
                 if key not in seen:
                     seen.add(key)
                     expanded.append(file_source)
@@ -616,12 +629,12 @@ def _dedupe_candidate(
     graph: KnowledgeGraph,
     title: str,
     aliases: list[str],
-    project: Optional[str],
+    project: str | None,
     summary: str,
     tags: list[str],
 ) -> dict[str, Any]:
     best_score = 0
-    best_note: Optional[Note] = None
+    best_note: Note | None = None
     best_reasons: list[str] = []
     candidate_norm = normalize_id(title)
     candidate_aliases = {alias.lower() for alias in aliases}
@@ -639,7 +652,10 @@ def _dedupe_candidate(
         if project and note.frontmatter.get("project") == project:
             score += 3
             reasons.append(f"same project: {project}")
-        if note.title.lower() in summary_lower or title.lower() in str(note.frontmatter.get("summary", "")).lower():
+        if (
+            note.title.lower() in summary_lower
+            or title.lower() in str(note.frontmatter.get("summary", "")).lower()
+        ):
             score += 2
             reasons.append("title mentioned in summary")
         shared_tags = sorted(set(tags).intersection(note.tags))
@@ -668,15 +684,13 @@ def _dedupe_candidate(
 def _recommendation_label(candidate: dict[str, Any]) -> str:
     """Return the compact recommendation label used in review filters."""
 
-    strategy = (candidate.get("dedupe", {}) or {}).get("strategy", "new")
-    if strategy == "duplicate":
-        return "merge_likely"
-    if strategy == "merge_into_existing":
-        return "ambiguous"
-    return "create_new"
+    return candidate_recommendation_label(candidate)
 
 
-def _merge_relationships(note: Note, candidate_relationships: list[dict[str, str]]) -> list[dict[str, str]]:
+def _merge_relationships(
+    note: Note,
+    candidate_relationships: list[dict[str, str]],
+) -> list[dict[str, str]]:
     relationships = [
         {"type": relationship.relation_type, "target": relationship.raw_target}
         for relationship in note.explicit_relationships
@@ -717,33 +731,3 @@ def _candidate_body(candidate: dict[str, Any]) -> str:
             return body + "\n\n" + evidence_block
         return evidence_block
     return body
-
-
-def _infer_entity_type(text: str) -> str:
-    lowered = text.lower()
-    if "decision" in lowered or "decided" in lowered:
-        return "decision"
-    if "meeting" in lowered or "attendees" in lowered:
-        return "meeting"
-    if "research" in lowered or "finding" in lowered:
-        return "research"
-    if "service" in lowered or "api" in lowered:
-        return "service"
-    if "issue" in lowered or "bug" in lowered or "blocker" in lowered:
-        return "issue"
-    if "stakeholder" in lowered or "owner" in lowered:
-        return "stakeholder"
-    if "workstream" in lowered or "process" in lowered:
-        return "workstream"
-    return "project"
-
-
-def _infer_summary(text: str) -> str:
-    normalized = _normalize_space(text)
-    if len(normalized) <= 160:
-        return normalized
-    return normalized[:157].rstrip() + "..."
-
-
-def _normalize_space(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()

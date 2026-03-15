@@ -11,34 +11,42 @@ import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from .common import (
+    candidate_recommendation_label,
+    infer_entity_type,
+    infer_summary,
+    load_json_file,
+    save_json_file,
+)
 from .graph import KnowledgeGraph, Note
 from .ingestion import (
-    accept_extracted_node,
     accept_all_candidates,
+    accept_extracted_node,
     ingest_sources,
     list_ingestion_runs,
     merge_extracted_node,
-    reject_extracted_node,
     reject_all_candidates,
+    reject_extracted_node,
     review_extracted_nodes,
 )
 from .templates import (
-    list_templates as get_templates,
-    render_template,
-    create_session_summary,
     create_decision_log,
+    create_session_summary,
+    render_template,
+)
+from .templates import (
+    list_templates as get_templates,
 )
 
-
 # Global graph instance
-_graph: Optional[KnowledgeGraph] = None
+_graph: KnowledgeGraph | None = None
 
 
 def get_graph() -> KnowledgeGraph:
@@ -70,7 +78,7 @@ def format_note_brief(note: Note) -> dict[str, Any]:
     }
 
 
-def _template_guidance(note: Optional[Note] = None) -> str:
+def _template_guidance(note: Note | None = None) -> str:
     """Return a soft nudge toward template-first note creation."""
 
     if note is None:
@@ -83,7 +91,8 @@ def _template_guidance(note: Optional[Note] = None) -> str:
         return (
             "This note was created free-form. For stronger retrieval and graph maintenance, "
             "prefer `create_from_template(...)` for new notes or refine this one with "
-            "`upsert_memory_node(...)` so it has structured frontmatter like `entity_type` and `summary`."
+            "`upsert_memory_node(...)` so it has structured frontmatter like "
+            "`entity_type` and `summary`."
         )
 
     return (
@@ -144,17 +153,11 @@ def _followups_path() -> Path:
 
 
 def _load_followups() -> list[dict]:
-    fp = _followups_path()
-    if not fp.exists():
-        return []
-    try:
-        return json.loads(fp.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
+    return load_json_file(_followups_path(), [])
 
 
 def _save_followups(followups: list[dict]) -> None:
-    _followups_path().write_text(json.dumps(followups, indent=2), encoding="utf-8")
+    save_json_file(_followups_path(), followups)
 
 
 def _reviews_path() -> Path:
@@ -162,17 +165,11 @@ def _reviews_path() -> Path:
 
 
 def _load_reviews() -> dict[str, dict]:
-    fp = _reviews_path()
-    if not fp.exists():
-        return {}
-    try:
-        return json.loads(fp.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
+    return load_json_file(_reviews_path(), {})
 
 
 def _save_reviews(reviews: dict[str, dict]) -> None:
-    _reviews_path().write_text(json.dumps(reviews, indent=2, sort_keys=True), encoding="utf-8")
+    save_json_file(_reviews_path(), reviews, sort_keys=True)
 
 
 def _suggestion_key(source_id: str, target_id: str, suggested_type: str) -> str:
@@ -190,42 +187,23 @@ def _review_confidence(review: dict, suggestion_score: int) -> float:
     return round(confidence, 2)
 
 
-def _infer_entity_type(raw_text: str, explicit_entity_type: Optional[str]) -> str:
+def _infer_entity_type(raw_text: str, explicit_entity_type: str | None) -> str:
     """Infer a memory node type from raw text if the caller did not specify one."""
 
-    if explicit_entity_type:
-        return explicit_entity_type
-
-    text = raw_text.lower()
-    if "decision" in text or "decided" in text:
-        return "decision"
-    if "meeting" in text or "attendees" in text:
-        return "meeting"
-    if "research" in text or "findings" in text:
-        return "research"
-    if "stakeholder" in text or "owner" in text:
-        return "stakeholder"
-    if "service" in text or "api" in text:
-        return "service"
-    if "issue" in text or "blocker" in text or "bug" in text:
-        return "issue"
-    if "workstream" in text:
-        return "workstream"
-    return "project"
+    return infer_entity_type(raw_text, explicit_entity_type=explicit_entity_type)
 
 
-def _infer_summary(raw_text: str, explicit_summary: Optional[str]) -> str:
+def _infer_summary(raw_text: str, explicit_summary: str | None) -> str:
     """Pick a short summary from raw text."""
 
-    if explicit_summary:
-        return explicit_summary
-    compact = " ".join(raw_text.strip().split())
-    if len(compact) <= 160:
-        return compact
-    return compact[:157].rstrip() + "..."
+    return infer_summary(raw_text, explicit_summary=explicit_summary)
 
 
-def _recent_session_notes(graph: KnowledgeGraph, project: Optional[str], limit: int = 3) -> list[dict[str, Any]]:
+def _recent_session_notes(
+    graph: KnowledgeGraph,
+    project: str | None,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
     """Return recent session notes, optionally filtered by project tag."""
 
     project_tag = f"project-{project.lower()}" if project else None
@@ -247,7 +225,10 @@ def _recent_session_notes(graph: KnowledgeGraph, project: Optional[str], limit: 
     return [format_note_brief(note) for note in candidates[:limit]]
 
 
-def _touched_note_summaries(graph: KnowledgeGraph, touched_notes: list[str]) -> list[dict[str, Any]]:
+def _touched_note_summaries(
+    graph: KnowledgeGraph,
+    touched_notes: list[str],
+) -> list[dict[str, Any]]:
     """Resolve touched note identifiers into note briefs."""
 
     resolved = []
@@ -263,12 +244,7 @@ def _touched_note_summaries(graph: KnowledgeGraph, touched_notes: list[str]) -> 
 def _candidate_recommendation(candidate: dict[str, Any]) -> str:
     """Return a compact recommendation label for a staged candidate."""
 
-    strategy = (candidate.get("dedupe", {}) or {}).get("strategy", "new")
-    if strategy == "duplicate":
-        return "merge_likely"
-    if strategy == "merge_into_existing":
-        return "ambiguous"
-    return "create_new"
+    return candidate_recommendation_label(candidate)
 
 
 def _candidate_reason(candidate: dict[str, Any]) -> str:
@@ -323,7 +299,9 @@ def _recommended_actions(
 
     for candidate in pending_candidates:
         recommendation = candidate.get("recommendation")
-        score = 100 if recommendation == "merge_likely" else 85 if recommendation == "ambiguous" else 75
+        score = (
+            100 if recommendation == "merge_likely" else 85 if recommendation == "ambiguous" else 75
+        )
         actions.append(
             {
                 "kind": "ingestion_candidate",
@@ -408,11 +386,11 @@ TOOLS = [
             "properties": {
                 "identifier": {
                     "type": "string",
-                    "description": "Note ID (filename without .md) or title"
+                    "description": "Note ID (filename without .md) or title",
                 }
             },
-            "required": ["identifier"]
-        }
+            "required": ["identifier"],
+        },
     ),
     Tool(
         name="list_links",
@@ -420,19 +398,16 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "note_id": {
-                    "type": "string",
-                    "description": "Note ID or title"
-                },
+                "note_id": {"type": "string", "description": "Note ID or title"},
                 "direction": {
                     "type": "string",
                     "enum": ["outgoing", "incoming", "both"],
                     "default": "both",
-                    "description": "Which links to return: outgoing (this note links to), incoming (link to this note), or both"
-                }
+                    "description": "Which links to return: outgoing (this note links to), incoming (link to this note), or both",
+                },
             },
-            "required": ["note_id"]
-        }
+            "required": ["note_id"],
+        },
     ),
     Tool(
         name="search",
@@ -440,18 +415,15 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query"
-                },
+                "query": {"type": "string", "description": "Search query"},
                 "limit": {
                     "type": "integer",
                     "default": 20,
-                    "description": "Maximum number of results to return"
-                }
+                    "description": "Maximum number of results to return",
+                },
             },
-            "required": ["query"]
-        }
+            "required": ["query"],
+        },
     ),
     Tool(
         name="traverse",
@@ -459,31 +431,28 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "start_id": {
-                    "type": "string",
-                    "description": "Starting note ID or title"
-                },
+                "start_id": {"type": "string", "description": "Starting note ID or title"},
                 "depth": {
                     "type": "integer",
                     "default": 2,
                     "minimum": 1,
                     "maximum": 5,
-                    "description": "Maximum number of hops from the starting note"
+                    "description": "Maximum number of hops from the starting note",
                 },
                 "direction": {
                     "type": "string",
                     "enum": ["outgoing", "incoming", "both"],
                     "default": "both",
-                    "description": "Direction to traverse"
+                    "description": "Direction to traverse",
                 },
                 "relation_types": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional relationship types to keep during traversal, for example depends_on, blocks, or related_to"
-                }
+                    "description": "Optional relationship types to keep during traversal, for example depends_on, blocks, or related_to",
+                },
             },
-            "required": ["start_id"]
-        }
+            "required": ["start_id"],
+        },
     ),
     Tool(
         name="find_path",
@@ -491,17 +460,11 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "start_id": {
-                    "type": "string",
-                    "description": "Starting note ID or title"
-                },
-                "end_id": {
-                    "type": "string",
-                    "description": "Ending note ID or title"
-                }
+                "start_id": {"type": "string", "description": "Starting note ID or title"},
+                "end_id": {"type": "string", "description": "Ending note ID or title"},
             },
-            "required": ["start_id", "end_id"]
-        }
+            "required": ["start_id", "end_id"],
+        },
     ),
     Tool(
         name="list_relationships",
@@ -509,23 +472,20 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "identifier": {
-                    "type": "string",
-                    "description": "Note ID or title"
-                },
+                "identifier": {"type": "string", "description": "Note ID or title"},
                 "direction": {
                     "type": "string",
                     "enum": ["outgoing", "incoming", "both"],
                     "default": "both",
-                    "description": "Which direction of relationships to inspect"
+                    "description": "Which direction of relationships to inspect",
                 },
                 "relation_type": {
                     "type": "string",
-                    "description": "Optional relationship type filter"
-                }
+                    "description": "Optional relationship type filter",
+                },
             },
-            "required": ["identifier"]
-        }
+            "required": ["identifier"],
+        },
     ),
     Tool(
         name="get_graph_context",
@@ -533,60 +493,46 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "identifier": {
-                    "type": "string",
-                    "description": "Anchor note ID or title"
-                },
+                "identifier": {"type": "string", "description": "Anchor note ID or title"},
                 "depth": {
                     "type": "integer",
                     "default": 2,
                     "minimum": 1,
                     "maximum": 5,
-                    "description": "Maximum graph distance from the anchor note"
+                    "description": "Maximum graph distance from the anchor note",
                 },
                 "limit": {
                     "type": "integer",
                     "default": 12,
-                    "description": "Maximum number of related nodes to return"
+                    "description": "Maximum number of related nodes to return",
                 },
                 "relation_types": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional relationship types to prioritize or restrict"
-                }
+                    "description": "Optional relationship types to prioritize or restrict",
+                },
             },
-            "required": ["identifier"]
-        }
+            "required": ["identifier"],
+        },
     ),
     Tool(
         name="list_tags",
         description="List all tags used across notes, with counts. Useful for understanding the structure of the knowledge base.",
-        inputSchema={
-            "type": "object",
-            "properties": {}
-        }
+        inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
         name="notes_by_tag",
         description="Get all notes with a specific tag.",
         inputSchema={
             "type": "object",
-            "properties": {
-                "tag": {
-                    "type": "string",
-                    "description": "Tag to filter by"
-                }
-            },
-            "required": ["tag"]
-        }
+            "properties": {"tag": {"type": "string", "description": "Tag to filter by"}},
+            "required": ["tag"],
+        },
     ),
     Tool(
         name="graph_summary",
         description="Get an overview of the knowledge graph: total notes, links, tags, orphan notes, and most connected notes. Useful for orientation.",
-        inputSchema={
-            "type": "object",
-            "properties": {}
-        }
+        inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
         name="list_notes",
@@ -597,18 +543,15 @@ TOOLS = [
                 "limit": {
                     "type": "integer",
                     "default": 100,
-                    "description": "Maximum number of notes to return"
+                    "description": "Maximum number of notes to return",
                 }
-            }
-        }
+            },
+        },
     ),
     Tool(
         name="rebuild",
         description="Rebuild the knowledge graph index. Use this after adding, editing, or deleting notes to refresh the graph.",
-        inputSchema={
-            "type": "object",
-            "properties": {}
-        }
+        inputSchema={"type": "object", "properties": {}},
     ),
     # ==================== Write Tools ====================
     Tool(
@@ -617,26 +560,23 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "title": {
-                    "type": "string",
-                    "description": "Title of the note"
-                },
+                "title": {"type": "string", "description": "Title of the note"},
                 "content": {
                     "type": "string",
-                    "description": "Markdown content (without frontmatter). Use [[Note Name]] to link to other notes. Prefer `create_from_template` instead when a template fits the note type."
+                    "description": "Markdown content (without frontmatter). Use [[Note Name]] to link to other notes. Prefer `create_from_template` instead when a template fits the note type.",
                 },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Tags to categorize the note (e.g., ['project', 'meeting', 'idea'])"
+                    "description": "Tags to categorize the note (e.g., ['project', 'meeting', 'idea'])",
                 },
                 "filename": {
                     "type": "string",
-                    "description": "Optional filename (without .md). Defaults to normalized title."
-                }
+                    "description": "Optional filename (without .md). Defaults to normalized title.",
+                },
             },
-            "required": ["title", "content"]
-        }
+            "required": ["title", "content"],
+        },
     ),
     Tool(
         name="update_note",
@@ -644,26 +584,20 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "identifier": {
-                    "type": "string",
-                    "description": "Note ID or title to update"
-                },
+                "identifier": {"type": "string", "description": "Note ID or title to update"},
                 "content": {
                     "type": "string",
-                    "description": "New markdown content (replaces existing body)"
+                    "description": "New markdown content (replaces existing body)",
                 },
-                "title": {
-                    "type": "string",
-                    "description": "New title (optional)"
-                },
+                "title": {"type": "string", "description": "New title (optional)"},
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "New tags (replaces existing tags)"
-                }
+                    "description": "New tags (replaces existing tags)",
+                },
             },
-            "required": ["identifier"]
-        }
+            "required": ["identifier"],
+        },
     ),
     Tool(
         name="append_to_note",
@@ -671,17 +605,14 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "identifier": {
-                    "type": "string",
-                    "description": "Note ID or title"
-                },
+                "identifier": {"type": "string", "description": "Note ID or title"},
                 "content": {
                     "type": "string",
-                    "description": "Content to append (will be added with a blank line separator)"
-                }
+                    "description": "Content to append (will be added with a blank line separator)",
+                },
             },
-            "required": ["identifier", "content"]
-        }
+            "required": ["identifier", "content"],
+        },
     ),
     Tool(
         name="delete_note",
@@ -689,13 +620,10 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "identifier": {
-                    "type": "string",
-                    "description": "Note ID or title to delete"
-                }
+                "identifier": {"type": "string", "description": "Note ID or title to delete"}
             },
-            "required": ["identifier"]
-        }
+            "required": ["identifier"],
+        },
     ),
     Tool(
         name="upsert_memory_node",
@@ -705,11 +633,25 @@ TOOLS = [
             "properties": {
                 "title": {"type": "string", "description": "Canonical note title"},
                 "summary": {"type": "string", "description": "Short machine-friendly summary"},
-                "entity_type": {"type": "string", "description": "Type like project, service, decision, issue, or session"},
+                "entity_type": {
+                    "type": "string",
+                    "description": "Type like project, service, decision, issue, or session",
+                },
                 "project": {"type": "string", "description": "Associated project or workstream"},
-                "status": {"type": "string", "description": "Status like active, blocked, done, draft, or stale"},
-                "aliases": {"type": "array", "items": {"type": "string"}, "description": "Alternative lookup names"},
-                "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for the note"},
+                "status": {
+                    "type": "string",
+                    "description": "Status like active, blocked, done, draft, or stale",
+                },
+                "aliases": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Alternative lookup names",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags for the note",
+                },
                 "relationships": {
                     "type": "array",
                     "description": "Typed relationships to other notes",
@@ -725,8 +667,8 @@ TOOLS = [
                 "body": {"type": "string", "description": "Optional supporting body content"},
                 "filename": {"type": "string", "description": "Optional filename override"},
             },
-            "required": ["title", "summary", "entity_type"]
-        }
+            "required": ["title", "summary", "entity_type"],
+        },
     ),
     Tool(
         name="update_relationships",
@@ -769,16 +711,13 @@ TOOLS = [
                     },
                 },
             },
-            "required": ["identifier"]
-        }
+            "required": ["identifier"],
+        },
     ),
     Tool(
         name="lint_memory_graph",
         description="Analyze the vault for weak memory nodes such as missing entity_type, missing summary, orphan notes, and missing confidence or review metadata.",
-        inputSchema={
-            "type": "object",
-            "properties": {}
-        }
+        inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
         name="suggest_relationships",
@@ -789,10 +728,10 @@ TOOLS = [
                 "limit": {
                     "type": "integer",
                     "default": 20,
-                    "description": "Maximum number of suggestions to return"
+                    "description": "Maximum number of suggestions to return",
                 }
-            }
-        }
+            },
+        },
     ),
     Tool(
         name="merge_memory_nodes",
@@ -802,10 +741,14 @@ TOOLS = [
             "properties": {
                 "source_identifier": {"type": "string", "description": "Source note ID or title"},
                 "target_identifier": {"type": "string", "description": "Target note ID or title"},
-                "archive_source": {"type": "boolean", "default": True, "description": "Archive the source note instead of deleting it"}
+                "archive_source": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Archive the source note instead of deleting it",
+                },
             },
-            "required": ["source_identifier", "target_identifier"]
-        }
+            "required": ["source_identifier", "target_identifier"],
+        },
     ),
     Tool(
         name="get_memory_health",
@@ -814,9 +757,13 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "identifier": {"type": "string", "description": "Optional note ID or title"},
-                "limit": {"type": "integer", "default": 50, "description": "Maximum nodes to return when listing graph health"}
-            }
-        }
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "description": "Maximum nodes to return when listing graph health",
+                },
+            },
+        },
     ),
     Tool(
         name="review_relationship_suggestions",
@@ -824,15 +771,19 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "limit": {"type": "integer", "default": 20, "description": "Maximum suggestions to return"},
+                "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "description": "Maximum suggestions to return",
+                },
                 "state": {
                     "type": "string",
                     "enum": ["pending", "accepted", "rejected", "all"],
                     "default": "pending",
-                    "description": "Filter suggestions by review state"
-                }
-            }
-        }
+                    "description": "Filter suggestions by review state",
+                },
+            },
+        },
     ),
     Tool(
         name="accept_relationship_suggestion",
@@ -842,10 +793,10 @@ TOOLS = [
             "properties": {
                 "source_id": {"type": "string"},
                 "target_id": {"type": "string"},
-                "suggested_type": {"type": "string"}
+                "suggested_type": {"type": "string"},
             },
-            "required": ["source_id", "target_id", "suggested_type"]
-        }
+            "required": ["source_id", "target_id", "suggested_type"],
+        },
     ),
     Tool(
         name="reject_relationship_suggestion",
@@ -856,10 +807,10 @@ TOOLS = [
                 "source_id": {"type": "string"},
                 "target_id": {"type": "string"},
                 "suggested_type": {"type": "string"},
-                "reason": {"type": "string", "description": "Optional rejection reason"}
+                "reason": {"type": "string", "description": "Optional rejection reason"},
             },
-            "required": ["source_id", "target_id", "suggested_type"]
-        }
+            "required": ["source_id", "target_id", "suggested_type"],
+        },
     ),
     Tool(
         name="memory_dashboard",
@@ -870,20 +821,20 @@ TOOLS = [
                 "health_limit": {
                     "type": "integer",
                     "default": 10,
-                    "description": "Maximum weak notes to return"
+                    "description": "Maximum weak notes to return",
                 },
                 "suggestion_limit": {
                     "type": "integer",
                     "default": 10,
-                    "description": "Maximum suggestions to return"
+                    "description": "Maximum suggestions to return",
                 },
                 "stale_limit": {
                     "type": "integer",
                     "default": 10,
-                    "description": "Maximum stale notes to return"
-                }
-            }
-        }
+                    "description": "Maximum stale notes to return",
+                },
+            },
+        },
     ),
     Tool(
         name="promote_to_memory_node",
@@ -892,9 +843,18 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "Canonical title for the memory node"},
-                "raw_text": {"type": "string", "description": "Loose content to convert into structured memory"},
-                "entity_type": {"type": "string", "description": "Optional explicit type like project, workstream, stakeholder, research, decision, service, or issue"},
-                "project": {"type": "string", "description": "Optional project or workstream grouping"},
+                "raw_text": {
+                    "type": "string",
+                    "description": "Loose content to convert into structured memory",
+                },
+                "entity_type": {
+                    "type": "string",
+                    "description": "Optional explicit type like project, workstream, stakeholder, research, decision, service, or issue",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Optional project or workstream grouping",
+                },
                 "status": {"type": "string", "description": "Optional status"},
                 "aliases": {"type": "array", "items": {"type": "string"}},
                 "tags": {"type": "array", "items": {"type": "string"}},
@@ -903,16 +863,13 @@ TOOLS = [
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {
-                            "type": {"type": "string"},
-                            "target": {"type": "string"}
-                        },
-                        "required": ["type", "target"]
-                    }
-                }
+                        "properties": {"type": {"type": "string"}, "target": {"type": "string"}},
+                        "required": ["type", "target"],
+                    },
+                },
             },
-            "required": ["title", "raw_text"]
-        }
+            "required": ["title", "raw_text"],
+        },
     ),
     Tool(
         name="ingest_sources",
@@ -920,12 +877,15 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "project": {"type": "string", "description": "Optional project grouping for extracted candidates"},
+                "project": {
+                    "type": "string",
+                    "description": "Optional project grouping for extracted candidates",
+                },
                 "mode": {
                     "type": "string",
                     "enum": ["stage"],
                     "default": "stage",
-                    "description": "Ingestion mode. v1 supports staged review only."
+                    "description": "Ingestion mode. v1 supports staged review only.",
                 },
                 "sources": {
                     "type": "array",
@@ -936,23 +896,47 @@ TOOLS = [
                             "type": {
                                 "type": "string",
                                 "enum": ["file", "text", "directory", "glob"],
-                                "description": "Source kind"
+                                "description": "Source kind",
                             },
-                            "path": {"type": "string", "description": "Absolute file path for file sources"},
-                            "name": {"type": "string", "description": "Display name for inline text"},
+                            "path": {
+                                "type": "string",
+                                "description": "Absolute file path for file sources",
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "Display name for inline text",
+                            },
                             "content": {"type": "string", "description": "Inline text content"},
-                            "recursive": {"type": "boolean", "description": "Whether to scan subdirectories for directory sources"},
-                            "extensions": {"type": "array", "items": {"type": "string"}, "description": "Allowed file extensions for directory sources"},
-                            "include": {"type": "array", "items": {"type": "string"}, "description": "Optional include glob patterns for directory sources"},
-                            "exclude": {"type": "array", "items": {"type": "string"}, "description": "Optional exclude glob patterns for directory sources"},
-                            "pattern": {"type": "string", "description": "Glob pattern for glob sources"},
+                            "recursive": {
+                                "type": "boolean",
+                                "description": "Whether to scan subdirectories for directory sources",
+                            },
+                            "extensions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Allowed file extensions for directory sources",
+                            },
+                            "include": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Optional include glob patterns for directory sources",
+                            },
+                            "exclude": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Optional exclude glob patterns for directory sources",
+                            },
+                            "pattern": {
+                                "type": "string",
+                                "description": "Glob pattern for glob sources",
+                            },
                         },
                         "required": ["type"],
                     },
                 },
             },
-            "required": ["sources"]
-        }
+            "required": ["sources"],
+        },
     ),
     Tool(
         name="list_ingestion_runs",
@@ -961,8 +945,8 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "limit": {"type": "integer", "default": 20, "description": "Maximum runs to return"}
-            }
-        }
+            },
+        },
     ),
     Tool(
         name="review_extracted_nodes",
@@ -975,16 +959,20 @@ TOOLS = [
                     "type": "string",
                     "enum": ["pending", "accepted", "rejected", "merged", "all"],
                     "default": "pending",
-                    "description": "Candidate review state filter"
+                    "description": "Candidate review state filter",
                 },
                 "recommendation": {
                     "type": "string",
                     "enum": ["create_new", "ambiguous", "merge_likely"],
-                    "description": "Optional recommendation filter"
+                    "description": "Optional recommendation filter",
                 },
-                "limit": {"type": "integer", "default": 20, "description": "Maximum candidates to return"},
-            }
-        }
+                "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "description": "Maximum candidates to return",
+                },
+            },
+        },
     ),
     Tool(
         name="review_queue",
@@ -992,15 +980,19 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "limit": {"type": "integer", "default": 8, "description": "Maximum actions to return"},
+                "limit": {
+                    "type": "integer",
+                    "default": 8,
+                    "description": "Maximum actions to return",
+                },
                 "run_id": {"type": "string", "description": "Optional ingestion run filter"},
                 "recommendation": {
                     "type": "string",
                     "enum": ["create_new", "ambiguous", "merge_likely"],
-                    "description": "Optional candidate recommendation filter"
+                    "description": "Optional candidate recommendation filter",
                 },
-            }
-        }
+            },
+        },
     ),
     Tool(
         name="accept_extracted_node",
@@ -1008,10 +1000,13 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "candidate_id": {"type": "string", "description": "Candidate ID from review_extracted_nodes"}
+                "candidate_id": {
+                    "type": "string",
+                    "description": "Candidate ID from review_extracted_nodes",
+                }
             },
-            "required": ["candidate_id"]
-        }
+            "required": ["candidate_id"],
+        },
     ),
     Tool(
         name="reject_extracted_node",
@@ -1019,11 +1014,14 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "candidate_id": {"type": "string", "description": "Candidate ID from review_extracted_nodes"},
+                "candidate_id": {
+                    "type": "string",
+                    "description": "Candidate ID from review_extracted_nodes",
+                },
                 "reason": {"type": "string", "description": "Optional rejection reason"},
             },
-            "required": ["candidate_id"]
-        }
+            "required": ["candidate_id"],
+        },
     ),
     Tool(
         name="merge_extracted_node",
@@ -1031,11 +1029,14 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "candidate_id": {"type": "string", "description": "Candidate ID from review_extracted_nodes"},
+                "candidate_id": {
+                    "type": "string",
+                    "description": "Candidate ID from review_extracted_nodes",
+                },
                 "target_identifier": {"type": "string", "description": "Existing note ID or title"},
             },
-            "required": ["candidate_id", "target_identifier"]
-        }
+            "required": ["candidate_id", "target_identifier"],
+        },
     ),
     Tool(
         name="accept_all_candidates",
@@ -1047,12 +1048,12 @@ TOOLS = [
                 "recommendation": {
                     "type": "string",
                     "enum": ["create_new", "ambiguous", "merge_likely"],
-                    "description": "Optional recommendation filter"
+                    "description": "Optional recommendation filter",
                 },
                 "limit": {"type": "integer", "description": "Optional bulk limit"},
             },
-            "required": ["run_id"]
-        }
+            "required": ["run_id"],
+        },
     ),
     Tool(
         name="reject_all_candidates",
@@ -1064,13 +1065,13 @@ TOOLS = [
                 "recommendation": {
                     "type": "string",
                     "enum": ["create_new", "ambiguous", "merge_likely"],
-                    "description": "Optional recommendation filter"
+                    "description": "Optional recommendation filter",
                 },
                 "reason": {"type": "string", "description": "Optional rejection reason"},
                 "limit": {"type": "integer", "description": "Optional bulk limit"},
             },
-            "required": ["run_id"]
-        }
+            "required": ["run_id"],
+        },
     ),
     Tool(
         name="start_session",
@@ -1080,13 +1081,25 @@ TOOLS = [
             "properties": {
                 "topic": {"type": "string", "description": "Topic or project to start working on"},
                 "project": {"type": "string", "description": "Optional project grouping"},
-                "limit": {"type": "integer", "default": 5, "description": "Maximum matching context notes"},
+                "limit": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Maximum matching context notes",
+                },
                 "graph_depth": {"type": "integer", "default": 2, "minimum": 1, "maximum": 5},
-                "graph_limit": {"type": "integer", "default": 8, "description": "Maximum related graph nodes"},
-                "recent_session_limit": {"type": "integer", "default": 3, "description": "Maximum recent sessions"},
+                "graph_limit": {
+                    "type": "integer",
+                    "default": 8,
+                    "description": "Maximum related graph nodes",
+                },
+                "recent_session_limit": {
+                    "type": "integer",
+                    "default": 3,
+                    "description": "Maximum recent sessions",
+                },
             },
-            "required": ["topic"]
-        }
+            "required": ["topic"],
+        },
     ),
     Tool(
         name="review_memory",
@@ -1099,8 +1112,8 @@ TOOLS = [
                 "stale_limit": {"type": "integer", "default": 10},
                 "candidate_limit": {"type": "integer", "default": 10},
                 "run_id": {"type": "string", "description": "Optional ingestion run filter"},
-            }
-        }
+            },
+        },
     ),
     Tool(
         name="end_session",
@@ -1116,19 +1129,19 @@ TOOLS = [
                 "project": {"type": "string"},
                 "topic": {"type": "string"},
                 "touched_notes": {"type": "array", "items": {"type": "string"}},
-                "followup_topic": {"type": "string", "description": "Optional topic label for generated followups"},
+                "followup_topic": {
+                    "type": "string",
+                    "description": "Optional topic label for generated followups",
+                },
             },
-            "required": ["summary", "accomplished"]
-        }
+            "required": ["summary", "accomplished"],
+        },
     ),
     # ==================== Template Tools ====================
     Tool(
         name="list_templates",
         description="List all available note templates. Call this first when creating a new note. Templates are the preferred starting point because they provide consistent structure for repo projects, services, issues, decisions, meetings, sessions, and other graph-friendly memory types.",
-        inputSchema={
-            "type": "object",
-            "properties": {}
-        }
+        inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
         name="create_from_template",
@@ -1138,25 +1151,33 @@ TOOLS = [
             "properties": {
                 "template": {
                     "type": "string",
-                    "enum": ["session", "decision", "project", "meeting", "idea", "bug", "learning"],
-                    "description": "Template to use"
+                    "enum": [
+                        "session",
+                        "decision",
+                        "project",
+                        "meeting",
+                        "idea",
+                        "bug",
+                        "learning",
+                    ],
+                    "description": "Template to use",
                 },
                 "title": {
                     "type": "string",
-                    "description": "Note title (optional - will auto-generate if not provided)"
+                    "description": "Note title (optional - will auto-generate if not provided)",
                 },
                 "fields": {
                     "type": "object",
-                    "description": "Template fields to fill in (varies by template)"
+                    "description": "Template fields to fill in (varies by template)",
                 },
                 "extra_tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Additional tags beyond template defaults"
-                }
+                    "description": "Additional tags beyond template defaults",
+                },
             },
-            "required": ["template", "fields"]
-        }
+            "required": ["template", "fields"],
+        },
     ),
     Tool(
         name="save_session_summary",
@@ -1166,38 +1187,35 @@ TOOLS = [
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "Brief 1-2 sentence summary of the session"
+                    "description": "Brief 1-2 sentence summary of the session",
                 },
                 "accomplished": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "List of things accomplished this session"
+                    "description": "List of things accomplished this session",
                 },
                 "decisions": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Key decisions made (optional)"
+                    "description": "Key decisions made (optional)",
                 },
                 "open_items": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Items still pending or blocked (optional)"
+                    "description": "Items still pending or blocked (optional)",
                 },
                 "next_session": {
                     "type": "string",
-                    "description": "What to pick up next time (optional)"
+                    "description": "What to pick up next time (optional)",
                 },
-                "project": {
-                    "type": "string",
-                    "description": "Project name for tagging (optional)"
-                },
+                "project": {"type": "string", "description": "Project name for tagging (optional)"},
                 "topic": {
                     "type": "string",
-                    "description": "Topic/focus of this session for the title (optional)"
-                }
+                    "description": "Topic/focus of this session for the title (optional)",
+                },
             },
-            "required": ["summary", "accomplished"]
-        }
+            "required": ["summary", "accomplished"],
+        },
     ),
     Tool(
         name="save_decision",
@@ -1207,36 +1225,27 @@ TOOLS = [
             "properties": {
                 "title": {
                     "type": "string",
-                    "description": "Short title for the decision (e.g., 'JWT vs Sessions')"
+                    "description": "Short title for the decision (e.g., 'JWT vs Sessions')",
                 },
                 "context": {
                     "type": "string",
-                    "description": "Background - why was this decision needed?"
+                    "description": "Background - why was this decision needed?",
                 },
                 "options": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Options that were considered"
+                    "description": "Options that were considered",
                 },
-                "decision": {
-                    "type": "string",
-                    "description": "What was decided"
-                },
-                "reasoning": {
-                    "type": "string",
-                    "description": "Why this option was chosen"
-                },
+                "decision": {"type": "string", "description": "What was decided"},
+                "reasoning": {"type": "string", "description": "Why this option was chosen"},
                 "implications": {
                     "type": "string",
-                    "description": "What this means going forward (optional)"
+                    "description": "What this means going forward (optional)",
                 },
-                "project": {
-                    "type": "string",
-                    "description": "Project name for tagging (optional)"
-                }
+                "project": {"type": "string", "description": "Project name for tagging (optional)"},
             },
-            "required": ["title", "context", "options", "decision", "reasoning"]
-        }
+            "required": ["title", "context", "options", "decision", "reasoning"],
+        },
     ),
     # ==================== Agent Memory Tools ====================
     Tool(
@@ -1247,28 +1256,28 @@ TOOLS = [
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Topic or keywords to build context around"
+                    "description": "Topic or keywords to build context around",
                 },
                 "limit": {
                     "type": "integer",
                     "default": 10,
-                    "description": "Maximum number of notes to return"
+                    "description": "Maximum number of notes to return",
                 },
                 "graph_depth": {
                     "type": "integer",
                     "default": 2,
                     "minimum": 1,
                     "maximum": 5,
-                    "description": "How far to expand from the best matching note in the graph"
+                    "description": "How far to expand from the best matching note in the graph",
                 },
                 "graph_limit": {
                     "type": "integer",
                     "default": 8,
-                    "description": "Maximum number of graph-neighbor notes to include"
-                }
+                    "description": "Maximum number of graph-neighbor notes to include",
+                },
             },
-            "required": ["query"]
-        }
+            "required": ["query"],
+        },
     ),
     Tool(
         name="get_note_summary",
@@ -1276,26 +1285,20 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "identifier": {
-                    "type": "string",
-                    "description": "Note ID or title"
-                },
+                "identifier": {"type": "string", "description": "Note ID or title"},
                 "max_chars": {
                     "type": "integer",
                     "default": 500,
-                    "description": "Maximum characters to return from the body"
-                }
+                    "description": "Maximum characters to return from the body",
+                },
             },
-            "required": ["identifier"]
-        }
+            "required": ["identifier"],
+        },
     ),
     Tool(
         name="list_stale_notes",
         description="List notes whose 'expires' frontmatter date is in the past. Useful for identifying outdated information.",
-        inputSchema={
-            "type": "object",
-            "properties": {}
-        }
+        inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
         name="add_followup",
@@ -1303,39 +1306,25 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "topic": {
-                    "type": "string",
-                    "description": "Short topic label for the reminder"
-                },
-                "reminder": {
-                    "type": "string",
-                    "description": "The reminder text"
-                }
+                "topic": {"type": "string", "description": "Short topic label for the reminder"},
+                "reminder": {"type": "string", "description": "The reminder text"},
             },
-            "required": ["topic", "reminder"]
-        }
+            "required": ["topic", "reminder"],
+        },
     ),
     Tool(
         name="list_followups",
         description="List all persistent followup reminders stored in the vault.",
-        inputSchema={
-            "type": "object",
-            "properties": {}
-        }
+        inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
         name="dismiss_followup",
         description="Dismiss (delete) a followup reminder by its ID.",
         inputSchema={
             "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string",
-                    "description": "Followup ID to dismiss"
-                }
-            },
-            "required": ["id"]
-        }
+            "properties": {"id": {"type": "string", "description": "Followup ID to dismiss"}},
+            "required": ["id"],
+        },
     ),
 ]
 
@@ -1343,17 +1332,17 @@ TOOLS = [
 async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
     """Handle a tool call and return the result as JSON."""
     graph = get_graph()
-    
+
     if name == "get_note":
         note = graph.get_note(arguments["identifier"])
         if note is None:
             return json.dumps({"error": f"Note not found: {arguments['identifier']}"})
         return json.dumps(format_note_full(note), indent=2)
-    
+
     elif name == "list_links":
         direction = arguments.get("direction", "both")
         links = graph.get_links(arguments["note_id"], direction)
-        
+
         # Enrich with titles
         result = {}
         for dir_name, link_ids in links.items():
@@ -1364,9 +1353,9 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                     result[dir_name].append({"id": lid, "title": note.title})
                 else:
                     result[dir_name].append({"id": lid, "title": lid})
-        
+
         return json.dumps(result, indent=2)
-    
+
     elif name == "search":
         query = arguments["query"]
         limit = arguments.get("limit", 20)
@@ -1377,13 +1366,13 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             brief["excerpt"] = _extract_excerpt(note, query)
             results.append(brief)
         return json.dumps(results, indent=2)
-    
+
     elif name == "traverse":
         depth = min(arguments.get("depth", 2), 5)  # Cap at 5
         direction = arguments.get("direction", "both")
         relation_types = arguments.get("relation_types")
         result = graph.traverse(arguments["start_id"], depth, direction, relation_types)
-        
+
         # Enrich nodes with titles
         nodes_with_titles = []
         for nid in result.nodes:
@@ -1392,15 +1381,18 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 nodes_with_titles.append({"id": nid, "title": note.title})
             else:
                 nodes_with_titles.append({"id": nid, "title": nid})
-        
-        return json.dumps({
-            "start": result.start_id,
-            "depth": result.depth,
-            "nodes": nodes_with_titles,
-            "edges": [{"from": e[0], "to": e[1]} for e in result.edges],
-            "total_nodes": len(result.nodes)
-        }, indent=2)
-    
+
+        return json.dumps(
+            {
+                "start": result.start_id,
+                "depth": result.depth,
+                "nodes": nodes_with_titles,
+                "edges": [{"from": e[0], "to": e[1]} for e in result.edges],
+                "total_nodes": len(result.nodes),
+            },
+            indent=2,
+        )
+
     elif name == "find_path":
         path = graph.find_path(arguments["start_id"], arguments["end_id"])
         if path is None:
@@ -1456,43 +1448,46 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
         anchor_note = graph.get_note(context["anchor"])
         context["anchor_title"] = anchor_note.title if anchor_note else context["anchor"]
         return json.dumps(context, indent=2)
-    
+
     elif name == "list_tags":
         tags = graph.list_tags()
         return json.dumps([{"tag": t, "count": c} for t, c in tags], indent=2)
-    
+
     elif name == "notes_by_tag":
         notes = graph.notes_by_tag(arguments["tag"])
         return json.dumps([format_note_brief(n) for n in notes], indent=2)
-    
+
     elif name == "graph_summary":
         stats = graph.get_stats()
-        
+
         # Enrich most connected with titles
         most_connected = []
         for nid, count in stats.most_connected:
             note = graph.get_note(nid)
             title = note.title if note else nid
             most_connected.append({"id": nid, "title": title, "connections": count})
-        
-        return json.dumps({
-            "total_notes": stats.total_notes,
-            "total_links": stats.total_links,
-            "total_tags": stats.total_tags,
-            "orphan_notes": stats.orphan_notes,
-            "most_connected": most_connected,
-            "total_relationships": stats.total_relationships,
-            "relationship_counts": [
-                {"type": relation_type, "count": count}
-                for relation_type, count in stats.relationship_counts
-            ],
-        }, indent=2)
-    
+
+        return json.dumps(
+            {
+                "total_notes": stats.total_notes,
+                "total_links": stats.total_links,
+                "total_tags": stats.total_tags,
+                "orphan_notes": stats.orphan_notes,
+                "most_connected": most_connected,
+                "total_relationships": stats.total_relationships,
+                "relationship_counts": [
+                    {"type": relation_type, "count": count}
+                    for relation_type, count in stats.relationship_counts
+                ],
+            },
+            indent=2,
+        )
+
     elif name == "list_notes":
         limit = arguments.get("limit", 100)
         notes = graph.list_all_notes()[:limit]
         return json.dumps([format_note_brief(n) for n in notes], indent=2)
-    
+
     elif name == "rebuild":
         count = graph.rebuild()
         return json.dumps({"status": "success", "notes_indexed": count})
@@ -1504,14 +1499,17 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 title=arguments["title"],
                 content=arguments["content"],
                 tags=arguments.get("tags"),
-                filename=arguments.get("filename")
+                filename=arguments.get("filename"),
             )
-            return json.dumps({
-                "status": "success",
-                "message": f"Created note: {note.title}",
-                "note": format_note_brief(note),
-                "guidance": _template_guidance(note),
-            }, indent=2)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Created note: {note.title}",
+                    "note": format_note_brief(note),
+                    "guidance": _template_guidance(note),
+                },
+                indent=2,
+            )
         except ValueError as e:
             return json.dumps({"error": str(e)})
 
@@ -1521,37 +1519,41 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 identifier=arguments["identifier"],
                 content=arguments.get("content"),
                 title=arguments.get("title"),
-                tags=arguments.get("tags")
+                tags=arguments.get("tags"),
             )
-            return json.dumps({
-                "status": "success",
-                "message": f"Updated note: {note.title}",
-                "note": format_note_brief(note)
-            }, indent=2)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Updated note: {note.title}",
+                    "note": format_note_brief(note),
+                },
+                indent=2,
+            )
         except ValueError as e:
             return json.dumps({"error": str(e)})
 
     elif name == "append_to_note":
         try:
             note = graph.append_to_note(
-                identifier=arguments["identifier"],
-                content=arguments["content"]
+                identifier=arguments["identifier"], content=arguments["content"]
             )
-            return json.dumps({
-                "status": "success",
-                "message": f"Appended to note: {note.title}",
-                "note": format_note_brief(note)
-            }, indent=2)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Appended to note: {note.title}",
+                    "note": format_note_brief(note),
+                },
+                indent=2,
+            )
         except ValueError as e:
             return json.dumps({"error": str(e)})
 
     elif name == "delete_note":
         deleted = graph.delete_note(arguments["identifier"])
         if deleted:
-            return json.dumps({
-                "status": "success",
-                "message": f"Deleted note: {arguments['identifier']}"
-            })
+            return json.dumps(
+                {"status": "success", "message": f"Deleted note: {arguments['identifier']}"}
+            )
         else:
             return json.dumps({"error": f"Note not found: {arguments['identifier']}"})
 
@@ -1569,12 +1571,15 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 body=arguments.get("body"),
                 filename=arguments.get("filename"),
             )
-            return json.dumps({
-                "status": "success",
-                "message": f"Upserted memory node: {note.title}",
-                "note": format_note_full(note),
-                "guidance": _template_guidance(note),
-            }, indent=2)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Upserted memory node: {note.title}",
+                    "note": format_note_full(note),
+                    "guidance": _template_guidance(note),
+                },
+                indent=2,
+            )
         except ValueError as e:
             return json.dumps({"error": str(e)})
 
@@ -1586,11 +1591,14 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 remove=arguments.get("remove"),
                 replace=arguments.get("replace"),
             )
-            return json.dumps({
-                "status": "success",
-                "message": f"Updated relationships for: {note.title}",
-                "note": format_note_full(note)
-            }, indent=2)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Updated relationships for: {note.title}",
+                    "note": format_note_full(note),
+                },
+                indent=2,
+            )
         except ValueError as e:
             return json.dumps({"error": str(e)})
 
@@ -1632,11 +1640,14 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 target_identifier=arguments["target_identifier"],
                 archive_source=arguments.get("archive_source", True),
             )
-            return json.dumps({
-                "status": "success",
-                "message": f"Merged into: {note.title}",
-                "note": format_note_full(note)
-            }, indent=2)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Merged into: {note.title}",
+                    "note": format_note_full(note),
+                },
+                indent=2,
+            )
         except ValueError as e:
             return json.dumps({"error": str(e)})
 
@@ -1646,23 +1657,29 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             health = graph.get_note_health(identifier)
             if health is None:
                 return json.dumps({"error": f"Note not found: {identifier}"})
-            return json.dumps({
-                "note_id": health.note_id,
-                "score": health.score,
-                "max_score": health.max_score,
-                "issues": health.issues,
-            }, indent=2)
+            return json.dumps(
+                {
+                    "note_id": health.note_id,
+                    "score": health.score,
+                    "max_score": health.max_score,
+                    "issues": health.issues,
+                },
+                indent=2,
+            )
 
         health_items = graph.get_graph_health(arguments.get("limit", 50))
-        return json.dumps([
-            {
-                "note_id": item.note_id,
-                "score": item.score,
-                "max_score": item.max_score,
-                "issues": item.issues,
-            }
-            for item in health_items
-        ], indent=2)
+        return json.dumps(
+            [
+                {
+                    "note_id": item.note_id,
+                    "score": item.score,
+                    "max_score": item.max_score,
+                    "issues": item.issues,
+                }
+                for item in health_items
+            ],
+            indent=2,
+        )
 
     elif name == "review_relationship_suggestions":
         state = arguments.get("state", "pending")
@@ -1710,11 +1727,14 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             "updated_at": datetime.now().isoformat(),
         }
         _save_reviews(reviews)
-        return json.dumps({
-            "status": "success",
-            "message": f"Accepted relationship suggestion for {source_id} -> {target_id}",
-            "note": format_note_full(note),
-        }, indent=2)
+        return json.dumps(
+            {
+                "status": "success",
+                "message": f"Accepted relationship suggestion for {source_id} -> {target_id}",
+                "note": format_note_full(note),
+            },
+            indent=2,
+        )
 
     elif name == "reject_relationship_suggestion":
         source_id = arguments["source_id"]
@@ -1731,11 +1751,14 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             "updated_at": datetime.now().isoformat(),
         }
         _save_reviews(reviews)
-        return json.dumps({
-            "status": "success",
-            "message": f"Rejected relationship suggestion for {source_id} -> {target_id}",
-            "review": reviews[key],
-        }, indent=2)
+        return json.dumps(
+            {
+                "status": "success",
+                "message": f"Rejected relationship suggestion for {source_id} -> {target_id}",
+                "review": reviews[key],
+            },
+            indent=2,
+        )
 
     elif name == "memory_dashboard":
         health_limit = arguments.get("health_limit", 10)
@@ -1844,7 +1867,10 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             recommendation=arguments.get("recommendation"),
             limit=arguments.get("limit", 20),
         )
-        return json.dumps([_format_review_candidate(candidate) for candidate in candidates], indent=2)
+        return json.dumps(
+            [_format_review_candidate(candidate) for candidate in candidates],
+            indent=2,
+        )
 
     elif name == "review_queue":
         limit = arguments.get("limit", 8)
@@ -2039,10 +2065,13 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             for followup in followups
             if topic_lower in followup.get("topic", "").lower()
             or topic_lower in followup.get("reminder", "").lower()
-            or (project_lower and (
-                project_lower in followup.get("topic", "").lower()
-                or project_lower in followup.get("reminder", "").lower()
-            ))
+            or (
+                project_lower
+                and (
+                    project_lower in followup.get("topic", "").lower()
+                    or project_lower in followup.get("reminder", "").lower()
+                )
+            )
         ]
 
         stale_notes = []
@@ -2117,7 +2146,9 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             recommendation=arguments.get("recommendation"),
             limit=candidate_limit,
         )
-        formatted_candidates = [_format_review_candidate(candidate) for candidate in pending_candidates]
+        formatted_candidates = [
+            _format_review_candidate(candidate) for candidate in pending_candidates
+        ]
         stale_payload = [
             {
                 "id": note.id,
@@ -2227,15 +2258,21 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 template_name=arguments["template"],
                 fields=arguments.get("fields", {}),
                 title=arguments.get("title"),
-                extra_tags=arguments.get("extra_tags")
+                extra_tags=arguments.get("extra_tags"),
             )
             note = graph.create_note(title=title, content=content, tags=tags)
-            return json.dumps({
-                "status": "success",
-                "message": f"Created note from template: {note.title}",
-                "note": format_note_brief(note),
-                "guidance": "Template-based note created. Prefer this flow for new notes so memory stays consistent and graph-friendly.",
-            }, indent=2)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Created note from template: {note.title}",
+                    "note": format_note_brief(note),
+                    "guidance": (
+                        "Template-based note created. Prefer this flow for new notes "
+                        "so memory stays consistent and graph-friendly."
+                    ),
+                },
+                indent=2,
+            )
         except ValueError as e:
             return json.dumps({"error": str(e)})
 
@@ -2248,14 +2285,17 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 open_items=arguments.get("open_items"),
                 next_session=arguments.get("next_session"),
                 project_tag=arguments.get("project"),
-                topic=arguments.get("topic")
+                topic=arguments.get("topic"),
             )
             note = graph.create_note(title=title, content=content, tags=tags)
-            return json.dumps({
-                "status": "success",
-                "message": f"Saved session summary: {note.title}",
-                "note": format_note_brief(note)
-            }, indent=2)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Saved session summary: {note.title}",
+                    "note": format_note_brief(note),
+                },
+                indent=2,
+            )
         except ValueError as e:
             return json.dumps({"error": str(e)})
 
@@ -2268,14 +2308,17 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 decision=arguments["decision"],
                 reasoning=arguments["reasoning"],
                 implications=arguments.get("implications"),
-                project_tag=arguments.get("project")
+                project_tag=arguments.get("project"),
             )
             note = graph.create_note(title=title, content=content, tags=tags)
-            return json.dumps({
-                "status": "success",
-                "message": f"Saved decision: {note.title}",
-                "note": format_note_brief(note)
-            }, indent=2)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Saved decision: {note.title}",
+                    "note": format_note_brief(note),
+                },
+                indent=2,
+            )
         except ValueError as e:
             return json.dumps({"error": str(e)})
 
@@ -2288,7 +2331,8 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
         followups = _load_followups()
         query_lower = query.lower()
         matching_followups = [
-            f for f in followups
+            f
+            for f in followups
             if query_lower in f.get("topic", "").lower()
             or query_lower in f.get("reminder", "").lower()
         ]
@@ -2311,12 +2355,15 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 graph_context["anchor_title"] = (
                     anchor_note.title if anchor_note else graph_context["anchor"]
                 )
-        return json.dumps({
-            "query": query,
-            "context_notes": context_notes,
-            "related_followups": matching_followups,
-            "graph_context": graph_context,
-        }, indent=2)
+        return json.dumps(
+            {
+                "query": query,
+                "context_notes": context_notes,
+                "related_followups": matching_followups,
+                "graph_context": graph_context,
+            },
+            indent=2,
+        )
 
     elif name == "get_note_summary":
         note = graph.get_note(arguments["identifier"])
@@ -2346,7 +2393,7 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             "id": str(uuid.uuid4()),
             "topic": arguments["topic"],
             "reminder": arguments["reminder"],
-            "created": datetime.now().isoformat()
+            "created": datetime.now().isoformat(),
         }
         followups.append(entry)
         _save_followups(followups)
@@ -2372,50 +2419,40 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
 def create_server(vault_path: Path) -> Server:
     """Create and configure the MCP server."""
     server = Server("linked-notes-mcp")
-    
+
     # Initialize the graph
     init_graph(vault_path)
-    
+
     @server.list_tools()
     async def list_tools():
         return TOOLS
-    
+
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any]):
         result = await handle_tool_call(name, arguments)
         return [TextContent(type="text", text=result)]
-    
+
     return server
 
 
 async def run_server(vault_path: Path):
     """Run the MCP server."""
     server = create_server(vault_path)
-    
+
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            server.create_initialization_options()
-        )
+        await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="MCP server for markdown knowledge graphs"
-    )
-    parser.add_argument(
-        "vault_path",
-        type=Path,
-        help="Path to the markdown vault/folder"
-    )
+    parser = argparse.ArgumentParser(description="MCP server for markdown knowledge graphs")
+    parser.add_argument("vault_path", type=Path, help="Path to the markdown vault/folder")
     args = parser.parse_args()
-    
+
     if not args.vault_path.exists():
         print(f"Error: Vault path does not exist: {args.vault_path}", file=sys.stderr)
         sys.exit(1)
-    
+
     asyncio.run(run_server(args.vault_path))
 
 
