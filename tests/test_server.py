@@ -124,6 +124,75 @@ class TestGetContext:
         assert result["graph_context"]["anchor"] == "alpha"
 
 
+class TestWorkflowTools:
+    @pytest.mark.asyncio
+    async def test_start_session_returns_working_brief(self, vault):
+        await handle_tool_call(
+            "save_session_summary",
+            {
+                "summary": "Worked on alpha",
+                "accomplished": ["Checked alpha dependencies"],
+                "project": "alpha",
+                "topic": "Alpha Review",
+            },
+        )
+        await handle_tool_call(
+            "add_followup",
+            {"topic": "alpha", "reminder": "Follow up on alpha blocker"},
+        )
+
+        result = json.loads(
+            await handle_tool_call(
+                "start_session",
+                {"topic": "alpha", "project": "alpha"},
+            )
+        )
+        assert result["working_brief"]["anchor"] is not None
+        assert "context_notes" in result["working_brief"]
+        assert "related_followups" in result["working_brief"]
+        assert "recent_sessions" in result["working_brief"]
+
+    @pytest.mark.asyncio
+    async def test_review_memory_includes_pending_ingestion_candidates(self, vault):
+        await handle_tool_call(
+            "ingest_sources",
+            {
+                "sources": [
+                    {
+                        "type": "text",
+                        "name": "seed",
+                        "content": "# Seed Context\nService dependency and owner context.",
+                    }
+                ]
+            },
+        )
+        result = json.loads(await handle_tool_call("review_memory", {}))
+        assert "pending_ingestion_candidates" in result
+        assert len(result["pending_ingestion_candidates"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_end_session_creates_session_note_and_followups(self, vault):
+        result = json.loads(
+            await handle_tool_call(
+                "end_session",
+                {
+                    "summary": "Wrapped up alpha work",
+                    "accomplished": ["Updated alpha context"],
+                    "open_items": ["Check beta dependency"],
+                    "project": "alpha",
+                    "topic": "Alpha Wrap",
+                    "touched_notes": ["alpha"],
+                },
+            )
+        )
+        assert result["status"] == "success"
+        assert result["session_note"]["title"].startswith("Session")
+        assert len(result["generated_followups"]) == 1
+
+        alpha = srv.get_graph().get_note("alpha")
+        assert alpha.frontmatter.get("last_reviewed")
+
+
 class TestGraphTools:
     @pytest.mark.asyncio
     async def test_list_relationships(self, vault):

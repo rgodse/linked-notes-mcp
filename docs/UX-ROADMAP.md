@@ -21,6 +21,13 @@ The main UX gap is not capability. It is orchestration.
 
 ## v0.2: session workflows
 
+Status:
+Implemented in the MCP layer with:
+
+- `start_session(...)`
+- `review_memory(...)`
+- `end_session(...)`
+
 Goal:
 Reduce the number of primitive calls needed to begin and end work.
 
@@ -31,8 +38,8 @@ Target additions:
 - compact project brief generation at session start
 - automatic surfacing of followups, stale notes, and nearby graph context
 
-Success condition:
-One tool call should be enough to get a usable working brief at the start of a session.
+Outcome:
+The system now has a first-pass workflow layer, but the presentation is still JSON-first and better suited to power users than general daily use.
 
 ## v0.3: review workflow
 

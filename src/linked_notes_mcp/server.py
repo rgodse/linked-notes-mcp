@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+import yaml
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
@@ -220,6 +221,41 @@ def _infer_summary(raw_text: str, explicit_summary: Optional[str]) -> str:
     if len(compact) <= 160:
         return compact
     return compact[:157].rstrip() + "..."
+
+
+def _recent_session_notes(graph: KnowledgeGraph, project: Optional[str], limit: int = 3) -> list[dict[str, Any]]:
+    """Return recent session notes, optionally filtered by project tag."""
+
+    project_tag = f"project-{project.lower()}" if project else None
+    candidates = []
+    for note in graph.list_all_notes():
+        if "session" not in note.tags:
+            continue
+        if project_tag and project_tag not in note.tags:
+            continue
+        candidates.append(note)
+
+    candidates.sort(
+        key=lambda item: (
+            str(item.frontmatter.get("modified") or item.frontmatter.get("created") or ""),
+            item.title,
+        ),
+        reverse=True,
+    )
+    return [format_note_brief(note) for note in candidates[:limit]]
+
+
+def _touched_note_summaries(graph: KnowledgeGraph, touched_notes: list[str]) -> list[dict[str, Any]]:
+    """Resolve touched note identifiers into note briefs."""
+
+    resolved = []
+    for identifier in touched_notes:
+        note = graph.get_note(identifier)
+        if note is None:
+            resolved.append({"identifier": identifier, "error": "Note not found"})
+            continue
+        resolved.append(format_note_brief(note))
+    return resolved
 
 
 # Define tools
@@ -833,6 +869,55 @@ TOOLS = [
                 "target_identifier": {"type": "string", "description": "Existing note ID or title"},
             },
             "required": ["candidate_id", "target_identifier"]
+        }
+    ),
+    Tool(
+        name="start_session",
+        description="Build a compact working brief for a topic or project by combining text search, graph context, followups, stale notes, and recent sessions.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string", "description": "Topic or project to start working on"},
+                "project": {"type": "string", "description": "Optional project grouping"},
+                "limit": {"type": "integer", "default": 5, "description": "Maximum matching context notes"},
+                "graph_depth": {"type": "integer", "default": 2, "minimum": 1, "maximum": 5},
+                "graph_limit": {"type": "integer", "default": 8, "description": "Maximum related graph nodes"},
+                "recent_session_limit": {"type": "integer", "default": 3, "description": "Maximum recent sessions"},
+            },
+            "required": ["topic"]
+        }
+    ),
+    Tool(
+        name="review_memory",
+        description="Return one compact maintenance queue covering weak notes, stale notes, relationship suggestions, and pending ingestion candidates.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "health_limit": {"type": "integer", "default": 10},
+                "suggestion_limit": {"type": "integer", "default": 10},
+                "stale_limit": {"type": "integer", "default": 10},
+                "candidate_limit": {"type": "integer", "default": 10},
+                "run_id": {"type": "string", "description": "Optional ingestion run filter"},
+            }
+        }
+    ),
+    Tool(
+        name="end_session",
+        description="Wrap up a work session by saving a session summary, optionally updating touched notes, and creating followups for open items.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string", "description": "Brief 1-2 sentence session summary"},
+                "accomplished": {"type": "array", "items": {"type": "string"}},
+                "decisions": {"type": "array", "items": {"type": "string"}},
+                "open_items": {"type": "array", "items": {"type": "string"}},
+                "next_session": {"type": "string"},
+                "project": {"type": "string"},
+                "topic": {"type": "string"},
+                "touched_notes": {"type": "array", "items": {"type": "string"}},
+                "followup_topic": {"type": "string", "description": "Optional topic label for generated followups"},
+            },
+            "required": ["summary", "accomplished"]
         }
     ),
     # ==================== Template Tools ====================
@@ -1607,6 +1692,206 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                     "action": result["action"],
                     "candidate_id": result["candidate_id"],
                     "note": format_note_full(result["note"]),
+                },
+                indent=2,
+            )
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    elif name == "start_session":
+        topic = arguments["topic"]
+        project = arguments.get("project")
+        limit = arguments.get("limit", 5)
+        graph_depth = min(arguments.get("graph_depth", 2), 5)
+        graph_limit = arguments.get("graph_limit", 8)
+        recent_session_limit = arguments.get("recent_session_limit", 3)
+
+        query = project or topic
+        notes = graph.search(query, limit)
+        if not notes and project and project.lower() not in topic.lower():
+            notes = graph.search(topic, limit)
+
+        context_notes = []
+        for note in notes:
+            brief = format_note_brief(note)
+            brief["excerpt"] = _extract_excerpt(note, topic)
+            context_notes.append(brief)
+
+        graph_context = None
+        if notes:
+            graph_context = graph.graph_context(
+                notes[0].id,
+                depth=graph_depth,
+                limit=graph_limit,
+            )
+            if "error" not in graph_context:
+                anchor_note = graph.get_note(graph_context["anchor"])
+                graph_context["anchor_title"] = (
+                    anchor_note.title if anchor_note else graph_context["anchor"]
+                )
+
+        followups = _load_followups()
+        topic_lower = topic.lower()
+        project_lower = project.lower() if project else None
+        relevant_followups = [
+            followup
+            for followup in followups
+            if topic_lower in followup.get("topic", "").lower()
+            or topic_lower in followup.get("reminder", "").lower()
+            or (project_lower and (
+                project_lower in followup.get("topic", "").lower()
+                or project_lower in followup.get("reminder", "").lower()
+            ))
+        ]
+
+        stale_notes = []
+        for note in graph.list_stale_notes():
+            if project and note.frontmatter.get("project") != project:
+                continue
+            brief = format_note_brief(note)
+            brief["expires"] = str(note.frontmatter.get("expires", ""))
+            stale_notes.append(brief)
+
+        recent_sessions = _recent_session_notes(graph, project, recent_session_limit)
+
+        return json.dumps(
+            {
+                "topic": topic,
+                "project": project,
+                "working_brief": {
+                    "anchor": context_notes[0] if context_notes else None,
+                    "context_notes": context_notes,
+                    "graph_context": graph_context,
+                    "related_followups": relevant_followups,
+                    "stale_notes": stale_notes[:5],
+                    "recent_sessions": recent_sessions,
+                },
+            },
+            indent=2,
+        )
+
+    elif name == "review_memory":
+        health_limit = arguments.get("health_limit", 10)
+        suggestion_limit = arguments.get("suggestion_limit", 10)
+        stale_limit = arguments.get("stale_limit", 10)
+        candidate_limit = arguments.get("candidate_limit", 10)
+        run_id = arguments.get("run_id")
+
+        stats = graph.get_stats()
+        health_items = graph.get_graph_health(health_limit)
+        stale_notes = graph.list_stale_notes()[:stale_limit]
+        reviews = _load_reviews()
+        suggestions = graph.suggest_relationships(suggestion_limit)
+        pending_suggestions = []
+        for suggestion in suggestions:
+            key = _suggestion_key(
+                suggestion.source_id,
+                suggestion.target_id,
+                suggestion.suggested_type,
+            )
+            review = reviews.get(key, {"state": "pending"})
+            if review.get("state", "pending") != "pending":
+                continue
+            pending_suggestions.append(
+                {
+                    "source_id": suggestion.source_id,
+                    "target_id": suggestion.target_id,
+                    "suggested_type": suggestion.suggested_type,
+                    "score": suggestion.score,
+                    "confidence": _review_confidence(review, suggestion.score),
+                    "reasons": suggestion.reasons,
+                }
+            )
+
+        pending_candidates = review_extracted_nodes(
+            Path(graph.vault_path),
+            run_id=run_id,
+            state="pending",
+            limit=candidate_limit,
+        )
+
+        return json.dumps(
+            {
+                "summary": {
+                    "total_notes": stats.total_notes,
+                    "total_links": stats.total_links,
+                    "total_relationships": stats.total_relationships,
+                    "orphan_notes": stats.orphan_notes,
+                    "pending_relationship_suggestions": len(pending_suggestions),
+                    "pending_ingestion_candidates": len(pending_candidates),
+                    "stale_notes": len(graph.list_stale_notes()),
+                },
+                "weak_notes": [
+                    {
+                        "note_id": item.note_id,
+                        "score": item.score,
+                        "max_score": item.max_score,
+                        "issues": item.issues,
+                    }
+                    for item in health_items
+                ],
+                "pending_relationship_suggestions": pending_suggestions,
+                "pending_ingestion_candidates": pending_candidates,
+                "stale_notes": [
+                    {
+                        "id": note.id,
+                        "title": note.title,
+                        "expires": str(note.frontmatter.get("expires", "")),
+                    }
+                    for note in stale_notes
+                ],
+            },
+            indent=2,
+        )
+
+    elif name == "end_session":
+        try:
+            title, content, tags = create_session_summary(
+                summary=arguments["summary"],
+                accomplished=arguments["accomplished"],
+                decisions=arguments.get("decisions"),
+                open_items=arguments.get("open_items"),
+                next_session=arguments.get("next_session"),
+                project_tag=arguments.get("project"),
+                topic=arguments.get("topic"),
+            )
+            note = graph.create_note(title=title, content=content, tags=tags)
+
+            touched_notes = arguments.get("touched_notes", [])
+            for identifier in touched_notes:
+                touched = graph.get_note(identifier)
+                if touched is None:
+                    continue
+                frontmatter = touched.frontmatter.copy()
+                frontmatter["last_reviewed"] = datetime.now().isoformat()
+                frontmatter["modified"] = datetime.now().isoformat()
+                touched.path.write_text(
+                    f"---\n{yaml.dump(frontmatter, default_flow_style=False)}---\n\n{touched.body}",
+                    encoding="utf-8",
+                )
+                graph._reload_note_from_disk(touched)
+
+            generated_followups = []
+            followup_topic = arguments.get("followup_topic") or arguments.get("project") or title
+            for item in arguments.get("open_items", []) or []:
+                followups = _load_followups()
+                entry = {
+                    "id": str(uuid.uuid4()),
+                    "topic": followup_topic,
+                    "reminder": item,
+                    "created": datetime.now().isoformat(),
+                }
+                followups.append(entry)
+                _save_followups(followups)
+                generated_followups.append(entry)
+
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Ended session: {note.title}",
+                    "session_note": format_note_brief(note),
+                    "touched_notes": _touched_note_summaries(graph, touched_notes),
+                    "generated_followups": generated_followups,
                 },
                 indent=2,
             )

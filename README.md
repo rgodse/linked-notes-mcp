@@ -334,6 +334,14 @@ The body should still exist, but treat it as supporting detail. The frontmatter 
 | `reject_extracted_node(...)` | Reject a low-value candidate and keep review history |
 | `merge_extracted_node(...)` | Merge a candidate into a specific existing note |
 
+### Workflow Tools
+
+| Tool | What it is good for |
+|------|----------------------|
+| `start_session(...)` | Build a compact working brief from search, graph context, followups, stale notes, and recent sessions |
+| `review_memory(...)` | Review one combined queue of weak notes, stale notes, relationship suggestions, and pending ingestion candidates |
+| `end_session(...)` | Save a session summary, update touched notes, and create followups for open items |
+
 ### Template Coverage
 
 Templates now cover both technical and non-technical work:
@@ -385,11 +393,11 @@ Current limits:
 - graph quality still depends on review and maintenance over time
 - mutation and retrieval behavior are tested, but the project is still evolving quickly
 - seed ingestion v1 is implemented, but only for staged local file and inline text flows
-- there is not yet a higher-level UX for session-start, session-end, or compact review workflows
+- the first workflow layer is implemented, but there is not yet a dedicated local UI
 
 Planned next step:
 
-- improve the UX layer on top of the memory graph so common flows feel like workflows instead of raw tool choreography
+- improve the review and local UI layer on top of the new workflow tools so daily use feels less like raw MCP interaction
 
 ## Next Steps
 
