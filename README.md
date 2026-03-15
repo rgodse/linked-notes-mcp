@@ -11,6 +11,14 @@ It is designed for agent-authored memory first: notes are optimized for retrieva
 
 The model is domain-agnostic and works for technical and non-technical work alike: projects, repositories, services, issues, stakeholders, meetings, research, initiatives, and workstreams.
 
+## Why I Built This
+
+I built this because I kept having to re-explain project context to my AI agent.
+
+Chat history was too fragile, and plain notes were too flat to preserve decisions, dependencies, and work relationships across sessions. I wanted a local, inspectable memory layer that both humans and agents could reuse over time.
+
+That pushed the design toward markdown as the source of truth, graph structure for context, and maintenance workflows to keep the memory usable instead of letting it collapse into note sprawl.
+
 ## Thesis
 
 Most local note-based memory fails for agents for the same reason it fails for humans at scale: the notes exist, but the structure does not.
