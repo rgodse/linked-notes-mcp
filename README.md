@@ -128,6 +128,10 @@ That matters because it means:
 - memory can be reviewed and cleaned up with dashboard and lint tools
 - the same vault can be used across Claude, Codex, and other MCP clients
 
+Another way to say it:
+
+`linked-notes-mcp` lets agents build a persistent knowledge graph of your work that survives across sessions and tools without giving up local control.
+
 ## Practical Use Cases
 
 ### Project continuity
@@ -149,6 +153,19 @@ A new agent or teammate can start from a project node and expand outward through
 ### Seeded memory plus ongoing enrichment
 
 The long-term direction is to ingest source material up front, stage structured memory candidates, and then let normal conversation flows keep enriching the accepted graph over time.
+
+## Workflow Story
+
+The easiest way to understand the project is as a workflow change, not just a storage format.
+
+Example:
+
+1. An agent analyzes a repository or project workspace.
+2. It writes durable notes about services, decisions, issues, and dependencies into the local graph.
+3. A future session starts from those notes instead of from zero.
+4. The next agent can trace blockers, understand architecture, and recover prior reasoning without re-reading everything.
+
+That is the value of the system: context becomes a persistent graph instead of a one-session artifact.
 
 ## Why Graph Retrieval Helps
 
@@ -410,6 +427,8 @@ Examples worth validating before building:
 
 - `repo-context-mcp` for durable repository and codebase memory
 - `jira-context-mcp` for durable execution memory around epics, blockers, dependencies, and workstreams
+- `research-context-mcp` for durable research notes, findings, and supporting evidence
+- `meeting-context-mcp` for decisions, followups, and operating context that should survive beyond one call
 - business-process or operating-context ingestion for recurring workflows, owners, risks, and exceptions
 
 The design rule for these add-ons is simple:
@@ -510,6 +529,8 @@ npm run build:ui
 ```
 
 The built assets are served from `src/linked_notes_mcp/static/` by the same local Python visualizer process.
+
+For repo and workflow demos, the visualizer is especially useful because it makes the graph legible as a living knowledge structure instead of a directory of notes. Over time this should become a stronger storytelling surface with better example graphs, screenshots, and denser repo/process walkthroughs.
 
 ## Docs
 
