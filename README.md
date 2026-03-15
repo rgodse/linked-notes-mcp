@@ -378,6 +378,24 @@ Planned next step:
 
 - build staged seed-context ingestion so existing docs, transcripts, and handoff material can become structured memory before long chat history exists
 
+## Next Steps
+
+The most likely direction from here is not turning `linked-notes-mcp` into a larger all-in-one system. It is keeping this repo as the local memory substrate and validating a small set of companion add-ons that write durable, graph-shaped memory into it.
+
+Examples worth validating before building:
+
+- `repo-context-mcp` for durable repository and codebase memory
+- `jira-context-mcp` for durable execution memory around epics, blockers, dependencies, and workstreams
+- business-process or operating-context ingestion for recurring workflows, owners, risks, and exceptions
+
+The design rule for these add-ons is simple:
+
+- do not mirror source systems wholesale
+- extract only durable, high-value context
+- emit structured notes and typed relationships into the same local graph
+
+This is intentionally framed as a validation direction, not a committed build plan. The right next move is to test whether people actually want domain-specific memory producers on top of a shared local memory layer.
+
 ## Suggested Workflow
 
 ### Session start
