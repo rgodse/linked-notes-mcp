@@ -258,6 +258,144 @@ def _touched_note_summaries(graph: KnowledgeGraph, touched_notes: list[str]) -> 
     return resolved
 
 
+def _candidate_recommendation(candidate: dict[str, Any]) -> str:
+    """Return a compact recommendation label for a staged candidate."""
+
+    strategy = (candidate.get("dedupe", {}) or {}).get("strategy", "new")
+    if strategy == "duplicate":
+        return "merge_likely"
+    if strategy == "merge_into_existing":
+        return "ambiguous"
+    return "create_new"
+
+
+def _candidate_reason(candidate: dict[str, Any]) -> str:
+    """Return a short human-readable explanation for a candidate recommendation."""
+
+    dedupe = candidate.get("dedupe", {}) or {}
+    strategy = dedupe.get("strategy", "new")
+    reasons = dedupe.get("reasons", [])
+    matched = dedupe.get("matched_note_id")
+    if strategy == "duplicate" and matched:
+        return f"clear title-level match to existing note `{matched}`"
+    if strategy == "merge_into_existing" and matched:
+        suffix = f" ({'; '.join(reasons)})" if reasons else ""
+        return f"possible merge into `{matched}`{suffix}"
+    entity_type = candidate.get("entity_type", "memory node")
+    return f"new {entity_type} candidate from staged source"
+
+
+def _format_review_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Format a staged candidate for compact review output."""
+
+    evidence = candidate.get("evidence", []) or []
+    top_evidence = evidence[0] if evidence else {}
+    return {
+        "id": candidate.get("id"),
+        "title": candidate.get("title"),
+        "entity_type": candidate.get("entity_type"),
+        "summary": candidate.get("summary"),
+        "project": candidate.get("project"),
+        "review_state": candidate.get("review_state"),
+        "confidence": candidate.get("confidence"),
+        "recommendation": _candidate_recommendation(candidate),
+        "reason": _candidate_reason(candidate),
+        "matched_note_id": (candidate.get("dedupe", {}) or {}).get("matched_note_id"),
+        "relationships": candidate.get("relationships", []),
+        "evidence_preview": top_evidence.get("snippet"),
+        "source_ref": top_evidence.get("loc"),
+        "created_at": candidate.get("created_at"),
+    }
+
+
+def _recommended_actions(
+    weak_notes: list[dict[str, Any]],
+    pending_suggestions: list[dict[str, Any]],
+    pending_candidates: list[dict[str, Any]],
+    stale_notes: list[dict[str, Any]],
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Build one prioritized queue of recommended review actions."""
+
+    actions: list[dict[str, Any]] = []
+
+    for candidate in pending_candidates:
+        recommendation = candidate.get("recommendation")
+        score = 100 if recommendation == "merge_likely" else 85 if recommendation == "ambiguous" else 75
+        actions.append(
+            {
+                "kind": "ingestion_candidate",
+                "priority": score,
+                "title": candidate.get("title"),
+                "action": recommendation,
+                "reason": candidate.get("reason"),
+                "candidate_id": candidate.get("id"),
+            }
+        )
+
+    for note in weak_notes:
+        score = max(0, 70 - int(note.get("score", 0)) * 5)
+        actions.append(
+            {
+                "kind": "weak_note",
+                "priority": score,
+                "title": note.get("note_id"),
+                "action": "improve_note",
+                "reason": ", ".join(note.get("issues", [])[:2]),
+                "note_id": note.get("note_id"),
+            }
+        )
+
+    for suggestion in pending_suggestions:
+        actions.append(
+            {
+                "kind": "relationship_suggestion",
+                "priority": 65 + int(suggestion.get("score", 0)),
+                "title": f"{suggestion.get('source_id')} -> {suggestion.get('target_id')}",
+                "action": "review_relationship",
+                "reason": "; ".join(suggestion.get("reasons", [])[:2]),
+                "source_id": suggestion.get("source_id"),
+                "target_id": suggestion.get("target_id"),
+                "suggested_type": suggestion.get("suggested_type"),
+            }
+        )
+
+    for note in stale_notes:
+        actions.append(
+            {
+                "kind": "stale_note",
+                "priority": 60,
+                "title": note.get("title"),
+                "action": "refresh_note",
+                "reason": f"expired on {note.get('expires', '')}",
+                "note_id": note.get("id"),
+            }
+        )
+
+    actions.sort(key=lambda item: (-item["priority"], item["kind"], item["title"]))
+    return actions[:limit]
+
+
+def _session_next_steps(
+    context_notes: list[dict[str, Any]],
+    followups: list[dict[str, Any]],
+    stale_notes: list[dict[str, Any]],
+    recent_sessions: list[dict[str, Any]],
+) -> list[str]:
+    """Return a compact list of suggested next actions for session start."""
+
+    steps: list[str] = []
+    if context_notes:
+        steps.append(f"Start from `{context_notes[0]['title']}` as the current anchor note")
+    if followups:
+        steps.append(f"Review {len(followups)} followup item(s) before making new changes")
+    if stale_notes:
+        steps.append(f"Refresh {len(stale_notes)} stale note(s) if they are still active")
+    if recent_sessions:
+        steps.append("Scan the most recent session summary to recover in-flight context quickly")
+    return steps[:4]
+
+
 # Define tools
 TOOLS = [
     Tool(
@@ -833,6 +971,17 @@ TOOLS = [
                     "description": "Candidate review state filter"
                 },
                 "limit": {"type": "integer", "default": 20, "description": "Maximum candidates to return"},
+            }
+        }
+    ),
+    Tool(
+        name="review_queue",
+        description="Return a compact prioritized triage queue across weak notes, stale notes, relationship suggestions, and pending ingestion candidates.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "default": 8, "description": "Maximum actions to return"},
+                "run_id": {"type": "string", "description": "Optional ingestion run filter"},
             }
         }
     ),
@@ -1642,7 +1791,79 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             state=arguments.get("state", "pending"),
             limit=arguments.get("limit", 20),
         )
-        return json.dumps(candidates, indent=2)
+        return json.dumps([_format_review_candidate(candidate) for candidate in candidates], indent=2)
+
+    elif name == "review_queue":
+        limit = arguments.get("limit", 8)
+        run_id = arguments.get("run_id")
+        health_items = graph.get_graph_health(limit)
+        stale_notes = graph.list_stale_notes()[:limit]
+        reviews = _load_reviews()
+        suggestions = graph.suggest_relationships(limit)
+        pending_suggestions = []
+        for suggestion in suggestions:
+            key = _suggestion_key(
+                suggestion.source_id,
+                suggestion.target_id,
+                suggestion.suggested_type,
+            )
+            review = reviews.get(key, {"state": "pending"})
+            if review.get("state", "pending") != "pending":
+                continue
+            pending_suggestions.append(
+                {
+                    "source_id": suggestion.source_id,
+                    "target_id": suggestion.target_id,
+                    "suggested_type": suggestion.suggested_type,
+                    "score": suggestion.score,
+                    "confidence": _review_confidence(review, suggestion.score),
+                    "reasons": suggestion.reasons,
+                }
+            )
+        pending_candidates = [
+            _format_review_candidate(candidate)
+            for candidate in review_extracted_nodes(
+                Path(graph.vault_path),
+                run_id=run_id,
+                state="pending",
+                limit=limit,
+            )
+        ]
+        weak_notes = [
+            {
+                "note_id": item.note_id,
+                "score": item.score,
+                "max_score": item.max_score,
+                "issues": item.issues,
+            }
+            for item in health_items
+        ]
+        stale_payload = [
+            {
+                "id": note.id,
+                "title": note.title,
+                "expires": str(note.frontmatter.get("expires", "")),
+            }
+            for note in stale_notes
+        ]
+        return json.dumps(
+            {
+                "recommended_actions": _recommended_actions(
+                    weak_notes=weak_notes,
+                    pending_suggestions=pending_suggestions,
+                    pending_candidates=pending_candidates,
+                    stale_notes=stale_payload,
+                    limit=limit,
+                ),
+                "counts": {
+                    "weak_notes": len(weak_notes),
+                    "pending_relationship_suggestions": len(pending_suggestions),
+                    "pending_ingestion_candidates": len(pending_candidates),
+                    "stale_notes": len(stale_payload),
+                },
+            },
+            indent=2,
+        )
 
     elif name == "accept_extracted_node":
         try:
@@ -1765,6 +1986,12 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                     "related_followups": relevant_followups,
                     "stale_notes": stale_notes[:5],
                     "recent_sessions": recent_sessions,
+                    "suggested_next_steps": _session_next_steps(
+                        context_notes=context_notes,
+                        followups=relevant_followups,
+                        stale_notes=stale_notes[:5],
+                        recent_sessions=recent_sessions,
+                    ),
                 },
             },
             indent=2,
@@ -1809,6 +2036,24 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             state="pending",
             limit=candidate_limit,
         )
+        formatted_candidates = [_format_review_candidate(candidate) for candidate in pending_candidates]
+        stale_payload = [
+            {
+                "id": note.id,
+                "title": note.title,
+                "expires": str(note.frontmatter.get("expires", "")),
+            }
+            for note in stale_notes
+        ]
+        weak_payload = [
+            {
+                "note_id": item.note_id,
+                "score": item.score,
+                "max_score": item.max_score,
+                "issues": item.issues,
+            }
+            for item in health_items
+        ]
 
         return json.dumps(
             {
@@ -1818,28 +2063,20 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                     "total_relationships": stats.total_relationships,
                     "orphan_notes": stats.orphan_notes,
                     "pending_relationship_suggestions": len(pending_suggestions),
-                    "pending_ingestion_candidates": len(pending_candidates),
+                    "pending_ingestion_candidates": len(formatted_candidates),
                     "stale_notes": len(graph.list_stale_notes()),
                 },
-                "weak_notes": [
-                    {
-                        "note_id": item.note_id,
-                        "score": item.score,
-                        "max_score": item.max_score,
-                        "issues": item.issues,
-                    }
-                    for item in health_items
-                ],
+                "recommended_actions": _recommended_actions(
+                    weak_notes=weak_payload,
+                    pending_suggestions=pending_suggestions,
+                    pending_candidates=formatted_candidates,
+                    stale_notes=stale_payload,
+                    limit=max(health_limit, suggestion_limit, stale_limit, candidate_limit),
+                ),
+                "weak_notes": weak_payload,
                 "pending_relationship_suggestions": pending_suggestions,
-                "pending_ingestion_candidates": pending_candidates,
-                "stale_notes": [
-                    {
-                        "id": note.id,
-                        "title": note.title,
-                        "expires": str(note.frontmatter.get("expires", "")),
-                    }
-                    for note in stale_notes
-                ],
+                "pending_ingestion_candidates": formatted_candidates,
+                "stale_notes": stale_payload,
             },
             indent=2,
         )

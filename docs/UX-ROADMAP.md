@@ -43,6 +43,14 @@ The system now has a first-pass workflow layer, but the presentation is still JS
 
 ## v0.3: review workflow
 
+Status:
+Implemented in the MCP layer with:
+
+- `review_memory(...)` returning prioritized `recommended_actions`
+- `review_queue(...)` for compact triage
+- formatted ingestion candidate recommendations and explanations
+- tighter `start_session(...)` next-step suggestions
+
 Goal:
 Make maintenance feel operational instead of manual.
 

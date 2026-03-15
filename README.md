@@ -340,6 +340,7 @@ The body should still exist, but treat it as supporting detail. The frontmatter 
 |------|----------------------|
 | `start_session(...)` | Build a compact working brief from search, graph context, followups, stale notes, and recent sessions |
 | `review_memory(...)` | Review one combined queue of weak notes, stale notes, relationship suggestions, and pending ingestion candidates |
+| `review_queue(...)` | Get a compact prioritized triage queue of the highest-value memory actions |
 | `end_session(...)` | Save a session summary, update touched notes, and create followups for open items |
 
 ### Template Coverage
@@ -397,7 +398,7 @@ Current limits:
 
 Planned next step:
 
-- improve the review and local UI layer on top of the new workflow tools so daily use feels less like raw MCP interaction
+- improve the review presentation and local UI layer further so daily use feels less like raw MCP interaction
 
 ## Next Steps
 

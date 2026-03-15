@@ -151,6 +151,7 @@ class TestWorkflowTools:
         assert "context_notes" in result["working_brief"]
         assert "related_followups" in result["working_brief"]
         assert "recent_sessions" in result["working_brief"]
+        assert "suggested_next_steps" in result["working_brief"]
 
     @pytest.mark.asyncio
     async def test_review_memory_includes_pending_ingestion_candidates(self, vault):
@@ -169,6 +170,12 @@ class TestWorkflowTools:
         result = json.loads(await handle_tool_call("review_memory", {}))
         assert "pending_ingestion_candidates" in result
         assert len(result["pending_ingestion_candidates"]) == 1
+        assert "recommended_actions" in result
+        assert result["pending_ingestion_candidates"][0]["recommendation"] in {
+            "create_new",
+            "ambiguous",
+            "merge_likely",
+        }
 
     @pytest.mark.asyncio
     async def test_end_session_creates_session_note_and_followups(self, vault):
@@ -191,6 +198,25 @@ class TestWorkflowTools:
 
         alpha = srv.get_graph().get_note("alpha")
         assert alpha.frontmatter.get("last_reviewed")
+
+    @pytest.mark.asyncio
+    async def test_review_queue_returns_prioritized_actions(self, vault):
+        await handle_tool_call(
+            "ingest_sources",
+            {
+                "sources": [
+                    {
+                        "type": "text",
+                        "name": "alpha-refresh",
+                        "content": "# Alpha Note\nThis is refreshed project context for Alpha Note.",
+                    }
+                ]
+            },
+        )
+        result = json.loads(await handle_tool_call("review_queue", {"limit": 5}))
+        assert "recommended_actions" in result
+        assert result["recommended_actions"]
+        assert "counts" in result
 
 
 class TestGraphTools:
@@ -446,6 +472,7 @@ class TestIngestionTools:
         assert len(candidates) == 1
         assert candidates[0]["title"] == "Handoff Notes"
         assert candidates[0]["review_state"] == "pending"
+        assert candidates[0]["recommendation"] in {"create_new", "ambiguous", "merge_likely"}
 
     @pytest.mark.asyncio
     async def test_accept_extracted_node_creates_memory_node(self, vault):
@@ -540,7 +567,7 @@ class TestIngestionTools:
             await handle_tool_call("review_extracted_nodes", {"run_id": run["run_id"]})
         )
         candidate = candidates[0]
-        assert candidate["dedupe"]["matched_note_id"] == "alpha"
+        assert candidate["matched_note_id"] == "alpha"
 
         result = json.loads(
             await handle_tool_call("accept_extracted_node", {"candidate_id": candidate["id"]})
