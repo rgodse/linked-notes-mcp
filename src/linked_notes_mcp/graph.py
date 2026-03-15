@@ -385,12 +385,13 @@ class KnowledgeGraph:
         if last_reviewed_raw:
             try:
                 reviewed = datetime.fromisoformat(str(last_reviewed_raw))
-                age_days = max(0, (datetime.now() - reviewed).days)
+                now = datetime.now(reviewed.tzinfo) if reviewed.tzinfo else datetime.now()
+                age_days = max(0, (now - reviewed).days)
                 if age_days <= 14:
                     score += 2
                 elif age_days <= 60:
                     score += 1
-            except ValueError:
+            except (TypeError, ValueError):
                 pass
 
         return score

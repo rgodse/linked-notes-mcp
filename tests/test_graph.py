@@ -489,6 +489,25 @@ class TestBugFixes:
         edge_set = list(dict.fromkeys(edge_list))
         assert len(edge_list) == len(edge_set), "Duplicate edges found in traverse result"
 
+    def test_search_handles_timezone_aware_last_reviewed(self, tmp_path):
+        """Timezone-aware last_reviewed values should not break scoring or retrieval."""
+        (tmp_path / "aware.md").write_text(
+            """---
+title: Aware Note
+entity_type: project
+summary: A note with an offset-aware review timestamp
+last_reviewed: 2026-03-14T10:00:00+00:00
+---
+Timezone aware timestamp note.
+"""
+        )
+
+        graph = KnowledgeGraph(tmp_path)
+        results = graph.search("Aware")
+
+        assert results
+        assert results[0].id == "aware"
+
 
 class TestStaleNotes:
     """Tests for list_stale_notes()."""

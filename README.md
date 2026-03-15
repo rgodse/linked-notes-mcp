@@ -344,6 +344,14 @@ uv run pytest
 uv run python scripts/run_linked_notes_mcp.py /path/to/test/vault
 ```
 
+## Docs
+
+- [Quickstart](docs/QUICKSTART.md)
+- [Guide](docs/GUIDE.md)
+- [Usage Rules](docs/USAGE-RULES.md)
+- [Autonomous Agent Integration](docs/COWORK-INTEGRATION.md)
+- [Seed Context Ingestion Spec](docs/INGESTION-SPEC.md)
+
 ## Comparison with Memory Styles
 
 | Memory style | Strengths | Weaknesses |
