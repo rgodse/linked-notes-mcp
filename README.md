@@ -423,13 +423,27 @@ Planned next step:
 
 The most likely direction from here is not turning `linked-notes-mcp` into a larger all-in-one system. It is keeping this repo as the local memory substrate and validating a small set of companion add-ons that write durable, graph-shaped memory into it.
 
-Examples worth validating before building:
+The clearest next add-on is:
 
 - `repo-context-mcp` for durable repository and codebase memory
+
+Strong future directions after that:
+
 - `jira-context-mcp` for durable execution memory around epics, blockers, dependencies, and workstreams
 - `research-context-mcp` for durable research notes, findings, and supporting evidence
 - `meeting-context-mcp` for decisions, followups, and operating context that should survive beyond one call
 - business-process or operating-context ingestion for recurring workflows, owners, risks, and exceptions
+- `context packs` for compact agent-ready bundles around a project, service, or domain
+- `graph diff` for understanding how repo, process, or project memory changes over time
+- graph hygiene improvements such as stale-node detection, pruning, and better maintenance workflows
+- pragmatic schema guardrails for templates and agent-authored frontmatter
+- lightweight temporal metadata for freshness and validity tracking
+
+Priority guidance:
+
+1. build memory producers that add durable high-value context
+2. improve retrieval and maintenance around that context
+3. add operational hardening only when scale and multi-agent use actually require it
 
 The design rule for these add-ons is simple:
 
