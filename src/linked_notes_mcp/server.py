@@ -21,10 +21,12 @@ from mcp.types import TextContent, Tool
 from .graph import KnowledgeGraph, Note
 from .ingestion import (
     accept_extracted_node,
+    accept_all_candidates,
     ingest_sources,
     list_ingestion_runs,
     merge_extracted_node,
     reject_extracted_node,
+    reject_all_candidates,
     review_extracted_nodes,
 )
 from .templates import (
@@ -933,12 +935,17 @@ TOOLS = [
                         "properties": {
                             "type": {
                                 "type": "string",
-                                "enum": ["file", "text"],
+                                "enum": ["file", "text", "directory", "glob"],
                                 "description": "Source kind"
                             },
                             "path": {"type": "string", "description": "Absolute file path for file sources"},
                             "name": {"type": "string", "description": "Display name for inline text"},
                             "content": {"type": "string", "description": "Inline text content"},
+                            "recursive": {"type": "boolean", "description": "Whether to scan subdirectories for directory sources"},
+                            "extensions": {"type": "array", "items": {"type": "string"}, "description": "Allowed file extensions for directory sources"},
+                            "include": {"type": "array", "items": {"type": "string"}, "description": "Optional include glob patterns for directory sources"},
+                            "exclude": {"type": "array", "items": {"type": "string"}, "description": "Optional exclude glob patterns for directory sources"},
+                            "pattern": {"type": "string", "description": "Glob pattern for glob sources"},
                         },
                         "required": ["type"],
                     },
@@ -970,6 +977,11 @@ TOOLS = [
                     "default": "pending",
                     "description": "Candidate review state filter"
                 },
+                "recommendation": {
+                    "type": "string",
+                    "enum": ["create_new", "ambiguous", "merge_likely"],
+                    "description": "Optional recommendation filter"
+                },
                 "limit": {"type": "integer", "default": 20, "description": "Maximum candidates to return"},
             }
         }
@@ -982,6 +994,11 @@ TOOLS = [
             "properties": {
                 "limit": {"type": "integer", "default": 8, "description": "Maximum actions to return"},
                 "run_id": {"type": "string", "description": "Optional ingestion run filter"},
+                "recommendation": {
+                    "type": "string",
+                    "enum": ["create_new", "ambiguous", "merge_likely"],
+                    "description": "Optional candidate recommendation filter"
+                },
             }
         }
     ),
@@ -1018,6 +1035,41 @@ TOOLS = [
                 "target_identifier": {"type": "string", "description": "Existing note ID or title"},
             },
             "required": ["candidate_id", "target_identifier"]
+        }
+    ),
+    Tool(
+        name="accept_all_candidates",
+        description="Bulk-accept pending ingestion candidates for a run, optionally filtered by recommendation.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "Ingestion run ID"},
+                "recommendation": {
+                    "type": "string",
+                    "enum": ["create_new", "ambiguous", "merge_likely"],
+                    "description": "Optional recommendation filter"
+                },
+                "limit": {"type": "integer", "description": "Optional bulk limit"},
+            },
+            "required": ["run_id"]
+        }
+    ),
+    Tool(
+        name="reject_all_candidates",
+        description="Bulk-reject pending ingestion candidates for a run, optionally filtered by recommendation.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "Ingestion run ID"},
+                "recommendation": {
+                    "type": "string",
+                    "enum": ["create_new", "ambiguous", "merge_likely"],
+                    "description": "Optional recommendation filter"
+                },
+                "reason": {"type": "string", "description": "Optional rejection reason"},
+                "limit": {"type": "integer", "description": "Optional bulk limit"},
+            },
+            "required": ["run_id"]
         }
     ),
     Tool(
@@ -1789,6 +1841,7 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             Path(graph.vault_path),
             run_id=arguments.get("run_id"),
             state=arguments.get("state", "pending"),
+            recommendation=arguments.get("recommendation"),
             limit=arguments.get("limit", 20),
         )
         return json.dumps([_format_review_candidate(candidate) for candidate in candidates], indent=2)
@@ -1796,6 +1849,7 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
     elif name == "review_queue":
         limit = arguments.get("limit", 8)
         run_id = arguments.get("run_id")
+        recommendation = arguments.get("recommendation")
         health_items = graph.get_graph_health(limit)
         stale_notes = graph.list_stale_notes()[:limit]
         reviews = _load_reviews()
@@ -1826,6 +1880,7 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 Path(graph.vault_path),
                 run_id=run_id,
                 state="pending",
+                recommendation=recommendation,
                 limit=limit,
             )
         ]
@@ -1916,6 +1971,31 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 },
                 indent=2,
             )
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    elif name == "accept_all_candidates":
+        try:
+            result = accept_all_candidates(
+                graph,
+                arguments["run_id"],
+                recommendation=arguments.get("recommendation"),
+                limit=arguments.get("limit"),
+            )
+            return json.dumps({"status": "success", **result}, indent=2)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    elif name == "reject_all_candidates":
+        try:
+            result = reject_all_candidates(
+                graph,
+                arguments["run_id"],
+                recommendation=arguments.get("recommendation"),
+                reason=arguments.get("reason"),
+                limit=arguments.get("limit"),
+            )
+            return json.dumps({"status": "success", **result}, indent=2)
         except ValueError as e:
             return json.dumps({"error": str(e)})
 
@@ -2034,6 +2114,7 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             Path(graph.vault_path),
             run_id=run_id,
             state="pending",
+            recommendation=arguments.get("recommendation"),
             limit=candidate_limit,
         )
         formatted_candidates = [_format_review_candidate(candidate) for candidate in pending_candidates]

@@ -475,6 +475,135 @@ class TestIngestionTools:
         assert candidates[0]["recommendation"] in {"create_new", "ambiguous", "merge_likely"}
 
     @pytest.mark.asyncio
+    async def test_ingest_directory_with_filters(self, vault, tmp_path):
+        source_dir = tmp_path / "seed"
+        source_dir.mkdir()
+        (source_dir / "one.md").write_text("# One\nService context here.")
+        (source_dir / "two.txt").write_text("Loose notes for process.")
+        (source_dir / "skip.log").write_text("Should not be ingested.")
+        nested = source_dir / "nested"
+        nested.mkdir()
+        (nested / "three.md").write_text("# Three\nNested markdown.")
+
+        result = json.loads(
+            await handle_tool_call(
+                "ingest_sources",
+                {
+                    "project": "dir-seed",
+                    "sources": [
+                        {
+                            "type": "directory",
+                            "path": str(source_dir),
+                            "recursive": True,
+                            "extensions": [".md", ".txt"],
+                            "exclude": ["nested/*"],
+                        }
+                    ],
+                },
+            )
+        )
+        assert result["artifacts"] == 2
+        candidates = json.loads(
+            await handle_tool_call("review_extracted_nodes", {"run_id": result["run_id"]})
+        )
+        titles = {candidate["title"] for candidate in candidates}
+        assert "One" in titles
+        assert any("two" in title.lower() or "notes" in title.lower() for title in titles)
+
+    @pytest.mark.asyncio
+    async def test_review_extracted_nodes_filters_by_recommendation(self, vault):
+        run = json.loads(
+            await handle_tool_call(
+                "ingest_sources",
+                {
+                    "sources": [
+                        {
+                            "type": "text",
+                            "name": "alpha-refresh",
+                            "content": "# Alpha Note\nThis is refreshed project context for Alpha Note.",
+                        },
+                        {
+                            "type": "text",
+                            "name": "brand-new",
+                            "content": "# Brand New Context\nFresh workstream context.",
+                        },
+                    ],
+                },
+            )
+        )
+        merge_likely = json.loads(
+            await handle_tool_call(
+                "review_extracted_nodes",
+                {
+                    "run_id": run["run_id"],
+                    "recommendation": "merge_likely",
+                },
+            )
+        )
+        assert merge_likely
+        assert all(item["recommendation"] == "merge_likely" for item in merge_likely)
+
+    @pytest.mark.asyncio
+    async def test_accept_all_candidates_bulk_action(self, vault):
+        run = json.loads(
+            await handle_tool_call(
+                "ingest_sources",
+                {
+                    "sources": [
+                        {
+                            "type": "text",
+                            "name": "brand-new-one",
+                            "content": "# Brand New One\nFresh workstream context one.",
+                        },
+                        {
+                            "type": "text",
+                            "name": "brand-new-two",
+                            "content": "# Brand New Two\nFresh workstream context two.",
+                        },
+                    ],
+                },
+            )
+        )
+        result = json.loads(
+            await handle_tool_call(
+                "accept_all_candidates",
+                {"run_id": run["run_id"], "recommendation": "create_new"},
+            )
+        )
+        assert result["status"] == "success"
+        assert result["accepted"] == 2
+
+    @pytest.mark.asyncio
+    async def test_reject_all_candidates_bulk_action(self, vault):
+        run = json.loads(
+            await handle_tool_call(
+                "ingest_sources",
+                {
+                    "sources": [
+                        {
+                            "type": "text",
+                            "name": "scratch-one",
+                            "content": "Loose scratch text one.",
+                        },
+                        {
+                            "type": "text",
+                            "name": "scratch-two",
+                            "content": "Loose scratch text two.",
+                        },
+                    ],
+                },
+            )
+        )
+        result = json.loads(
+            await handle_tool_call(
+                "reject_all_candidates",
+                {"run_id": run["run_id"], "reason": "bulk reject"},
+            )
+        )
+        assert result["status"] == "success"
+        assert result["rejected"] == 2
+
+    @pytest.mark.asyncio
     async def test_accept_extracted_node_creates_memory_node(self, vault):
         run = json.loads(
             await handle_tool_call(

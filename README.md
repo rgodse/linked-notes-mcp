@@ -327,12 +327,14 @@ The body should still exist, but treat it as supporting detail. The frontmatter 
 
 | Tool | What it is good for |
 |------|----------------------|
-| `ingest_sources(...)` | Stage candidate memory nodes from local files or inline text |
+| `ingest_sources(...)` | Stage candidate memory nodes from local files, directories, glob patterns, or inline text |
 | `list_ingestion_runs(...)` | Review recent staged ingestion runs |
-| `review_extracted_nodes(...)` | Inspect candidates before promotion |
+| `review_extracted_nodes(...)` | Inspect candidates before promotion, with recommendation filtering |
 | `accept_extracted_node(...)` | Promote a candidate into the graph or merge a clear match |
 | `reject_extracted_node(...)` | Reject a low-value candidate and keep review history |
 | `merge_extracted_node(...)` | Merge a candidate into a specific existing note |
+| `accept_all_candidates(...)` | Bulk-accept pending candidates for a run |
+| `reject_all_candidates(...)` | Bulk-reject pending candidates for a run |
 
 ### Workflow Tools
 
@@ -393,7 +395,7 @@ Current limits:
 - it is optimized for durable explicit memory, not full conversational recall
 - graph quality still depends on review and maintenance over time
 - mutation and retrieval behavior are tested, but the project is still evolving quickly
-- seed ingestion v1 is implemented, but only for staged local file and inline text flows
+- staged seed ingestion supports files, directories, globs, and inline text, but extraction is still conservative and usually produces one candidate per source
 - the first workflow layer is implemented, but there is not yet a dedicated local UI
 
 Planned next step:

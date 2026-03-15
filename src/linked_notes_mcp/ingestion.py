@@ -143,6 +143,7 @@ def review_extracted_nodes(
     vault_path: Path,
     run_id: Optional[str] = None,
     state: str = "pending",
+    recommendation: Optional[str] = None,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     candidates = _load_candidates(vault_path)
@@ -151,6 +152,8 @@ def review_extracted_nodes(
         if run_id and candidate.get("run_id") != run_id:
             continue
         if state != "all" and candidate.get("review_state", "pending") != state:
+            continue
+        if recommendation and _recommendation_label(candidate) != recommendation:
             continue
         result.append(candidate)
     result.sort(key=lambda item: item.get("created_at", ""), reverse=True)
@@ -180,7 +183,8 @@ def ingest_sources(
     candidates = _load_candidates(vault_path)
     created_candidates = 0
 
-    for source in sources:
+    expanded_sources = _expand_sources(sources)
+    for source in expanded_sources:
         artifact, extracted = _extract_source(graph, run_id, source, project, created_at)
         artifacts.append(asdict(artifact))
         candidates.extend(asdict(candidate) for candidate in extracted)
@@ -279,6 +283,63 @@ def reject_extracted_node(
     )
     _update_run_pending_count(Path(graph.vault_path), candidate["run_id"])
     return {"status": "rejected", "candidate_id": candidate_id, "reason": reason}
+
+
+def accept_all_candidates(
+    graph: KnowledgeGraph,
+    run_id: str,
+    recommendation: Optional[str] = None,
+    limit: Optional[int] = None,
+) -> dict[str, Any]:
+    """Bulk-accept pending candidates for a run."""
+
+    candidates = review_extracted_nodes(
+        Path(graph.vault_path),
+        run_id=run_id,
+        state="pending",
+        recommendation=recommendation,
+        limit=limit or 10_000,
+    )
+    results = []
+    for candidate in candidates:
+        outcome = accept_extracted_node(graph, candidate["id"])
+        results.append(
+            {
+                "candidate_id": candidate["id"],
+                "action": outcome["action"],
+                "note_id": outcome["note"].id,
+                "title": outcome["note"].title,
+            }
+        )
+    return {"run_id": run_id, "accepted": len(results), "results": results}
+
+
+def reject_all_candidates(
+    graph: KnowledgeGraph,
+    run_id: str,
+    recommendation: Optional[str] = None,
+    reason: Optional[str] = None,
+    limit: Optional[int] = None,
+) -> dict[str, Any]:
+    """Bulk-reject pending candidates for a run."""
+
+    candidates = review_extracted_nodes(
+        Path(graph.vault_path),
+        run_id=run_id,
+        state="pending",
+        recommendation=recommendation,
+        limit=limit or 10_000,
+    )
+    results = []
+    for candidate in candidates:
+        outcome = reject_extracted_node(graph, candidate["id"], reason)
+        results.append(
+            {
+                "candidate_id": candidate["id"],
+                "review_state": outcome["status"],
+            }
+        )
+    return {"run_id": run_id, "rejected": len(results), "results": results}
 
 
 def merge_extracted_node(
@@ -485,6 +546,72 @@ def _candidate_from_content(
     )
 
 
+def _expand_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expand directory and glob sources into file sources."""
+
+    expanded: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source in sources:
+        source_type = source.get("type")
+        if source_type in {"file", "text"}:
+            key = json.dumps(source, sort_keys=True)
+            if key not in seen:
+                seen.add(key)
+                expanded.append(source)
+            continue
+
+        if source_type == "directory":
+            directory = Path(source["path"])
+            if not directory.exists() or not directory.is_dir():
+                raise ValueError(f"Source directory not found: {directory}")
+            recursive = bool(source.get("recursive", True))
+            include_extensions = {
+                ext.lower() if ext.startswith(".") else f".{ext.lower()}"
+                for ext in source.get("extensions", [".md", ".markdown", ".txt"])
+            }
+            include_patterns = source.get("include", [])
+            exclude_patterns = source.get("exclude", [])
+            iterator = directory.rglob("*") if recursive else directory.glob("*")
+            for path in sorted(iterator):
+                if not path.is_file():
+                    continue
+                if include_extensions and path.suffix.lower() not in include_extensions:
+                    continue
+                relative = str(path.relative_to(directory))
+                if include_patterns and not any(path.match(pattern) or relative_match(relative, pattern) for pattern in include_patterns):
+                    continue
+                if exclude_patterns and any(path.match(pattern) or relative_match(relative, pattern) for pattern in exclude_patterns):
+                    continue
+                file_source = {"type": "file", "path": str(path)}
+                key = json.dumps(file_source, sort_keys=True)
+                if key not in seen:
+                    seen.add(key)
+                    expanded.append(file_source)
+            continue
+
+        if source_type == "glob":
+            pattern = source["pattern"]
+            for path in sorted(Path().glob(pattern)):
+                if not path.is_file():
+                    continue
+                file_source = {"type": "file", "path": str(path.resolve())}
+                key = json.dumps(file_source, sort_keys=True)
+                if key not in seen:
+                    seen.add(key)
+                    expanded.append(file_source)
+            continue
+
+        raise ValueError(f"Unsupported source type: {source_type}")
+
+    return expanded
+
+
+def relative_match(relative_path: str, pattern: str) -> bool:
+    """Match a relative path against a glob-like pattern."""
+
+    return Path(relative_path).match(pattern)
+
+
 def _dedupe_candidate(
     graph: KnowledgeGraph,
     title: str,
@@ -536,6 +663,17 @@ def _dedupe_candidate(
         "score": best_score,
         "reasons": best_reasons,
     }
+
+
+def _recommendation_label(candidate: dict[str, Any]) -> str:
+    """Return the compact recommendation label used in review filters."""
+
+    strategy = (candidate.get("dedupe", {}) or {}).get("strategy", "new")
+    if strategy == "duplicate":
+        return "merge_likely"
+    if strategy == "merge_into_existing":
+        return "ambiguous"
+    return "create_new"
 
 
 def _merge_relationships(note: Note, candidate_relationships: list[dict[str, str]]) -> list[dict[str, str]]:

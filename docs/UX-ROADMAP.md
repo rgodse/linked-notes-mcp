@@ -69,6 +69,14 @@ Users can do a useful maintenance pass without manually stitching together multi
 
 ## v0.4: seed ingestion UX
 
+Status:
+Partially implemented in the MCP layer with:
+
+- directory and glob ingestion
+- extension/include/exclude filtering
+- recommendation-filtered review
+- bulk accept/reject actions by run
+
 Goal:
 Turn staged ingestion into an approachable workflow.
 
