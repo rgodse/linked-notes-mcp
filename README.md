@@ -396,11 +396,11 @@ Current limits:
 - graph quality still depends on review and maintenance over time
 - mutation and retrieval behavior are tested, but the project is still evolving quickly
 - staged seed ingestion supports files, directories, globs, and inline text, but extraction is still conservative and usually produces one candidate per source
-- the first workflow layer is implemented, but there is not yet a dedicated local UI
+- the local UI is now usable for focused graph exploration, but it is still an early workbench rather than a finished product surface
 
 Planned next step:
 
-- improve the review presentation and local UI layer further so daily use feels less like raw MCP interaction
+- improve graph readability, onboarding, and richer repo/process-specific note generation so the local UI becomes a stronger daily work surface
 
 ## Next Steps
 
@@ -466,6 +466,51 @@ uv run pytest
 uv run python scripts/run_linked_notes_mcp.py /path/to/test/vault
 ```
 
+## Local Visualizer
+
+There is now a local-only graph workbench for exploring the vault in the browser without sending anything to the cloud.
+
+What it is:
+
+- React Flow-based graph UI over the same local markdown vault
+- focused views for repo, subsystem, and flow exploration
+- collapsible controls, resizable detail panel, and optional charcoal theme
+- separate local source view for repo-backed notes with line-aware file previews
+- read-first interface over the existing graph, not a new hosted service
+
+Run it like this:
+
+```bash
+uv run python scripts/run_linked_notes_ui.py /path/to/your/notes
+```
+
+Then open the printed `http://127.0.0.1:8765` URL in your browser.
+
+The current UI supports:
+
+- `Overview`, `Subsystem`, and `Flow` graph lenses
+- focus-area and detail-level controls for denser or cleaner subgraphs
+- node detail inspection with `Note` and `Source` modes
+- local source previews from repo evidence captured in notes
+- persistent local UI state in the browser
+- no hosted backend, no CDN, no cloud dependency
+
+This keeps the core `linked-notes-mcp` idea intact:
+
+- markdown vault remains the source of truth
+- the MCP server and graph model remain the backend
+- the browser UI is a local add-on over the same graph
+- repo and process context are derived into notes, not stored in a separate service
+
+If you are iterating on the UI itself:
+
+```bash
+npm install
+npm run build:ui
+```
+
+The built assets are served from `src/linked_notes_mcp/static/` by the same local Python visualizer process.
+
 ## Docs
 
 - [Quickstart](docs/QUICKSTART.md)
@@ -474,6 +519,7 @@ uv run python scripts/run_linked_notes_mcp.py /path/to/test/vault
 - [Autonomous Agent Integration](docs/COWORK-INTEGRATION.md)
 - [Seed Context Ingestion Spec](docs/INGESTION-SPEC.md)
 - [UX Roadmap](docs/UX-ROADMAP.md)
+- [Visualizer Spec](docs/VISUALIZER-SPEC.md)
 
 ## Comparison with Memory Styles
 

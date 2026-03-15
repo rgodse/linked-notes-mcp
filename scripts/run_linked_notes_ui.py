@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ruff: noqa: I001
-"""Launch linked-notes-mcp from a local clone without relying on editable installs."""
+"""Launch linked-notes-ui from a local clone without relying on editable installs."""
 
 from pathlib import Path
 import sys
@@ -14,6 +14,6 @@ if str(SRC_DIR) not in sys.path:
 
 
 if __name__ == "__main__":
-    from linked_notes_mcp.server import main
+    from linked_notes_mcp.visualizer import main
 
     main()

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>linked-notes source view</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="source-shell">
+      <header class="source-header">
+        <div>
+          <div class="eyebrow">Local Source View</div>
+          <h1 id="sourceTitle">Source</h1>
+        </div>
+        <div class="detail-tabs">
+          <button id="themeToggle" type="button" class="secondary">Charcoal</button>
+          <button type="button" class="secondary" onclick="window.close()">Close</button>
+        </div>
+      </header>
+      <main class="source-main">
+        <section class="panel">
+          <div class="panel-title">Repo Evidence</div>
+          <div id="sourceMeta"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-title">Snippet Preview</div>
+          <div id="sourcePreview"></div>
+        </section>
+      </main>
+    </div>
+    <script src="/source.js"></script>
+  </body>
+</html>

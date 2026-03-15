@@ -40,6 +40,7 @@ dev = [
 
 [project.scripts]
 linked-notes-mcp = "linked_notes_mcp.server:main"
+linked-notes-ui = "linked_notes_mcp.visualizer:main"
 
 [project.urls]
 Homepage = "https://github.com/rgodse/linked-notes-mcp"
@@ -52,6 +53,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/linked_notes_mcp"]
+
+[tool.hatch.build]
+include = [
+    "src/linked_notes_mcp/static/**",
+]
 
 [tool.ruff]
 line-length = 100

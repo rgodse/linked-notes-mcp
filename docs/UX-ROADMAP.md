@@ -93,6 +93,9 @@ A user can ingest a few docs and promote the top candidates without reading raw 
 
 ## v0.5: local UI
 
+Status:
+Planned. The next meaningful UX jump is a graph-native local interface rather than a generic dashboard.
+
 Goal:
 Add a thin local interface on top of the MCP backend.
 
@@ -102,9 +105,12 @@ Candidate views:
 - `Context`: graph-local project brief
 - `Review`: weak notes, suggestions, ingestion review
 - `Ingest`: source registration and candidate promotion
+- `Graph`: interactive graph exploration of notes and relationships
 
 Success condition:
 The system is usable daily without relying only on direct MCP tool calls.
+
+See [Visualizer Spec](VISUALIZER-SPEC.md) for the proposed shape of the graph UI and optional repo-aware enrichment.
 
 ## Design Rules
 
@@ -121,4 +127,4 @@ If only a few things get built next, the priority order should be:
 2. `review_memory`
 3. seed ingestion review improvements
 4. `end_session`
-5. thin local UI
+5. graph-native local UI
