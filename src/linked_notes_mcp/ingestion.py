@@ -10,6 +10,7 @@ This module implements a staged ingestion flow:
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -55,6 +56,7 @@ class IngestionRun:
     artifacts: int
     candidates_created: int
     pending_review: int
+    skipped: int = 0
 
 
 @dataclass
@@ -102,6 +104,10 @@ def _ingestion_reviews_path(vault_path: Path) -> Path:
     return vault_path / ".linked_notes_ingestion_reviews.json"
 
 
+def _ingestion_artifacts_path(vault_path: Path) -> Path:
+    return vault_path / ".linked_notes_ingestion_artifacts.json"
+
+
 def _load_json(path: Path, default: Any) -> Any:
     return load_json_file(path, default)
 
@@ -132,6 +138,30 @@ def _load_reviews(vault_path: Path) -> list[dict[str, Any]]:
 
 def _save_reviews(vault_path: Path, reviews: list[dict[str, Any]]) -> None:
     _save_json(_ingestion_reviews_path(vault_path), reviews)
+
+
+def _load_artifacts(vault_path: Path) -> list[dict[str, Any]]:
+    return _load_json(_ingestion_artifacts_path(vault_path), [])
+
+
+def _save_artifacts(vault_path: Path, artifacts: list[dict[str, Any]]) -> None:
+    _save_json(_ingestion_artifacts_path(vault_path), artifacts)
+
+
+def _compute_source_checksum(source: dict[str, Any]) -> str | None:
+    """Compute SHA-256 checksum of source content without full extraction."""
+    source_type = source.get("type")
+    if source_type == "file":
+        path = Path(source["path"])
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+    elif source_type == "text":
+        content = source["content"]
+    else:
+        return None
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def list_ingestion_runs(vault_path: Path, limit: int = 20) -> list[dict[str, Any]]:
@@ -166,6 +196,7 @@ def ingest_sources(
     sources: list[dict[str, Any]],
     project: str | None = None,
     mode: str = "stage",
+    use_llm: bool = True,
 ) -> dict[str, Any]:
     """Create an ingestion run and stage extracted candidates."""
 
@@ -180,18 +211,32 @@ def ingest_sources(
     run_id = f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     created_at = datetime.now().isoformat()
 
-    artifacts: list[dict[str, Any]] = []
+    # Fix 4: load persisted artifacts and build checksum dedup set
+    existing_artifacts = _load_artifacts(vault_path)
+    seen_checksums = {a["checksum"] for a in existing_artifacts}
+
+    new_artifacts: list[dict[str, Any]] = []
     candidates = _load_candidates(vault_path)
     created_candidates = 0
+    skipped = 0
 
-    expanded_sources = _expand_sources(sources)
+    expanded_sources = _expand_sources(sources, vault_path=vault_path)  # Fix 6
     for source in expanded_sources:
-        artifact, extracted = _extract_source(graph, run_id, source, project, created_at)
-        artifacts.append(asdict(artifact))
+        checksum = _compute_source_checksum(source)
+        if checksum is not None and checksum in seen_checksums:
+            skipped += 1
+            continue
+        artifact, extracted = _extract_source(
+            graph, run_id, source, project, created_at, use_llm=use_llm
+        )
+        new_artifacts.append(asdict(artifact))
+        if checksum is not None:
+            seen_checksums.add(checksum)
         candidates.extend(asdict(candidate) for candidate in extracted)
         created_candidates += len(extracted)
 
     _save_candidates(vault_path, candidates)
+    _save_artifacts(vault_path, existing_artifacts + new_artifacts)
 
     runs = _load_runs(vault_path)
     run = IngestionRun(
@@ -199,9 +244,10 @@ def ingest_sources(
         project=project,
         mode=mode,
         created_at=created_at,
-        artifacts=len(artifacts),
+        artifacts=len(new_artifacts),
         candidates_created=created_candidates,
         pending_review=created_candidates,
+        skipped=skipped,
     )
     runs.append(asdict(run))
     _save_runs(vault_path, runs)
@@ -209,9 +255,10 @@ def ingest_sources(
     return {
         "run_id": run_id,
         "project": project,
-        "artifacts": len(artifacts),
+        "artifacts": len(new_artifacts),
         "candidates_created": created_candidates,
         "pending_review": created_candidates,
+        "skipped": skipped,
     }
 
 
@@ -224,9 +271,23 @@ def accept_extracted_node(graph: KnowledgeGraph, candidate_id: str) -> dict[str,
 
     dedupe = candidate.get("dedupe", {})
     target_identifier = dedupe.get("matched_note_id")
-    if dedupe.get("strategy") in {"merge_into_existing", "duplicate"} and target_identifier:
+
+    # Fix 3: only auto-merge exact duplicates; ambiguous matches create a new note
+    # and return a merge_suggestion so the agent can decide explicitly.
+    if dedupe.get("strategy") == "duplicate" and target_identifier:
         note = merge_extracted_node(graph, candidate_id, target_identifier)["note"]
         return {"action": "merged", "note": note, "candidate_id": candidate_id}
+
+    # Fix 5: build provenance fields to write into the promoted note
+    provenance: dict[str, Any] = {
+        "confidence": candidate.get("confidence"),
+        "last_reviewed": datetime.now().isoformat(),
+    }
+    source_refs = [e["loc"] for e in candidate.get("evidence", []) if e.get("loc")]
+    if source_refs:
+        provenance["source_refs"] = source_refs
+    if candidate.get("artifact_id"):
+        provenance["derived_from"] = candidate["artifact_id"]
 
     note = graph.upsert_memory_node(
         title=candidate["title"],
@@ -239,6 +300,7 @@ def accept_extracted_node(graph: KnowledgeGraph, candidate_id: str) -> dict[str,
         relationships=candidate.get("relationships") or [],
         body=_candidate_body(candidate),
         filename=normalize_id(candidate["title"]),
+        extra_frontmatter=provenance,
     )
 
     candidate["review_state"] = "accepted"
@@ -255,7 +317,17 @@ def accept_extracted_node(graph: KnowledgeGraph, candidate_id: str) -> dict[str,
         ),
     )
     _update_run_pending_count(Path(graph.vault_path), candidate["run_id"])
-    return {"action": "accepted", "note": note, "candidate_id": candidate_id}
+
+    result: dict[str, Any] = {"action": "accepted", "note": note, "candidate_id": candidate_id}
+    # Fix 3: surface merge suggestion for ambiguous matches so the agent can
+    # call merge_extracted_node explicitly if desired.
+    if dedupe.get("strategy") == "merge_into_existing" and target_identifier:
+        result["merge_suggestion"] = {
+            "target_note_id": target_identifier,
+            "score": dedupe.get("score", 0),
+            "reasons": dedupe.get("reasons", []),
+        }
+    return result
 
 
 def reject_extracted_node(
@@ -366,6 +438,17 @@ def merge_extracted_node(
     project = target.frontmatter.get("project") or candidate.get("project")
     status = target.frontmatter.get("status") or candidate.get("status")
 
+    # Fix 5: carry provenance from the ingested candidate into the merged note
+    provenance: dict[str, Any] = {
+        "confidence": candidate.get("confidence"),
+        "last_reviewed": datetime.now().isoformat(),
+    }
+    source_refs = [e["loc"] for e in candidate.get("evidence", []) if e.get("loc")]
+    if source_refs:
+        provenance["source_refs"] = source_refs
+    if candidate.get("artifact_id"):
+        provenance["derived_from"] = candidate["artifact_id"]
+
     updated = graph.upsert_memory_node(
         title=target.title,
         summary=summary,
@@ -377,6 +460,7 @@ def merge_extracted_node(
         relationships=relationships,
         body=_merged_body(target, candidate),
         filename=target.id,
+        extra_frontmatter=provenance,
     )
 
     candidate["review_state"] = "merged"
@@ -451,6 +535,7 @@ def _extract_source(
     source: dict[str, Any],
     project: str | None,
     created_at: str,
+    use_llm: bool = True,
 ) -> tuple[IngestionArtifact, list[IngestionCandidate]]:
     source_type = source.get("type")
     if source_type == "file":
@@ -477,6 +562,42 @@ def _extract_source(
         project=project,
         created_at=created_at,
     )
+
+    # Fix 1: try LLM extraction first when available
+    if use_llm:
+        try:
+            from .extraction import can_use_llm, extract_candidates_llm
+
+            vault_path_obj = Path(graph.vault_path) if graph.vault_path else None
+            if can_use_llm(vault_path=vault_path_obj):
+                llm_results = extract_candidates_llm(
+                    content, display_name, project, vault_path=vault_path_obj
+                )
+                if llm_results:
+                    llm_candidates = [
+                        _candidate_from_llm_result(graph, artifact, r, project, created_at)
+                        for r in llm_results
+                    ]
+                    return artifact, llm_candidates
+        except Exception:
+            pass  # Fall through to heuristic path
+
+    # Fix 2: heuristic path — chunk by H2/H3 headings, else single candidate
+    chunks = _chunk_by_headings(content)
+    if chunks:
+        candidates = [
+            _candidate_from_content(
+                graph=graph,
+                artifact=artifact,
+                content=chunk_body,
+                display_name=chunk_heading,
+                project=project,
+                created_at=created_at,
+            )
+            for chunk_heading, chunk_body in chunks
+        ]
+        return artifact, candidates
+
     candidate = _candidate_from_content(
         graph=graph,
         artifact=artifact,
@@ -486,6 +607,98 @@ def _extract_source(
         created_at=created_at,
     )
     return artifact, [candidate]
+
+
+def _chunk_by_headings(content: str) -> list[tuple[str, str]]:
+    """Split content on H2/H3 headings into (heading, body) chunks.
+
+    Only activates when there are at least 2 H2/H3 headings and total
+    content exceeds 300 characters.
+    """
+    pattern = re.compile(r"^#{2,3}\s+(.+)$", re.MULTILINE)
+    matches = list(pattern.finditer(content))
+
+    if len(matches) < 2 or len(content) <= 300:
+        return []
+
+    chunks: list[tuple[str, str]] = []
+
+    # Preamble before first heading — include only if it has non-heading content
+    preamble = content[: matches[0].start()].strip()
+    preamble_body_lines = [
+        line for line in preamble.splitlines() if line.strip() and not line.startswith("#")
+    ]
+    if preamble_body_lines:
+        h1_match = re.search(r"^#\s+(.+)", preamble, re.MULTILINE)
+        preamble_title = h1_match.group(1).strip() if h1_match else "Introduction"
+        chunks.append((preamble_title, preamble))
+
+    for i, match in enumerate(matches):
+        heading = match.group(1).strip()
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        body = content[start:end].strip()
+        chunks.append((heading, body))
+
+    return chunks
+
+
+def _candidate_from_llm_result(
+    graph: KnowledgeGraph,
+    artifact: IngestionArtifact,
+    llm_candidate: dict[str, Any],
+    project: str | None,
+    created_at: str,
+) -> IngestionCandidate:
+    """Convert an LLM extraction result dict to an IngestionCandidate."""
+    title = llm_candidate.get("title") or "Untitled"
+    entity_type = llm_candidate.get("entity_type") or "concept"
+    summary = llm_candidate.get("summary") or ""
+    aliases = llm_candidate.get("aliases") or []
+    tags = llm_candidate.get("tags") or []
+    relationships = llm_candidate.get("relationships") or []
+    body = llm_candidate.get("body") or ""
+
+    inferred_project = llm_candidate.get("project") or project
+
+    evidence_text = body[:200] + ("..." if len(body) > 200 else "")
+    evidence = [
+        {
+            "artifact_id": artifact.id,
+            "snippet": evidence_text.strip(),
+            "loc": artifact.source_ref,
+        }
+    ]
+
+    dedupe = _dedupe_candidate(
+        graph=graph,
+        title=title,
+        aliases=aliases,
+        project=inferred_project,
+        summary=summary,
+        tags=tags,
+    )
+
+    return IngestionCandidate(
+        id=f"candidate-{uuid.uuid4().hex[:8]}",
+        run_id=artifact.run_id,
+        artifact_id=artifact.id,
+        review_state="pending",
+        candidate_type="node",
+        entity_type=entity_type,
+        title=title,
+        aliases=aliases,
+        summary=summary,
+        project=inferred_project,
+        status=None,
+        tags=tags,
+        relationships=relationships,
+        body=body,
+        evidence=evidence,
+        confidence=0.9,
+        dedupe=dedupe,
+        created_at=created_at,
+    )
 
 
 def _candidate_from_content(
@@ -553,7 +766,10 @@ def _candidate_from_content(
     )
 
 
-def _expand_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _expand_sources(
+    sources: list[dict[str, Any]],
+    vault_path: Path | None = None,
+) -> list[dict[str, Any]]:
     """Expand directory and glob sources into file sources."""
 
     expanded: list[dict[str, Any]] = []
@@ -604,7 +820,9 @@ def _expand_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         if source_type == "glob":
             pattern = source["pattern"]
-            for path in sorted(Path().glob(pattern)):
+            # Fix 6: resolve glob relative to vault_path, not CWD
+            base = vault_path or Path()
+            for path in sorted(base.glob(pattern)):
                 if not path.is_file():
                     continue
                 file_source = {"type": "file", "path": str(path.resolve())}

@@ -356,15 +356,18 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
         if not cleaned:
             return None, None, None
 
-        candidate = Path(cleaned)
-        if candidate.is_absolute() and candidate.exists():
-            return candidate, start_line, end_line
-
         repo_root = self._resolve_repo_root(note)
         if repo_root is None:
             return None, None, None
 
-        joined = repo_root / cleaned
+        repo_root_resolved = repo_root.resolve()
+        joined = (repo_root / cleaned).resolve()
+
+        try:
+            joined.relative_to(repo_root_resolved)
+        except ValueError:
+            return None, None, None
+
         if joined.exists():
             return joined, start_line, end_line
         return None, None, None

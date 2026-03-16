@@ -705,6 +705,155 @@ class TestIngestionTools:
         assert result["action"] == "merged"
         assert result["note"]["id"] == "alpha"
 
+    @pytest.mark.asyncio
+    async def test_ingest_sources_skips_duplicate_checksum(self, vault):
+        content = "# Dedup Check\nSome unique content for checksum dedup test."
+        source = {"type": "text", "name": "dedup-check", "content": content}
+
+        first = json.loads(
+            await handle_tool_call("ingest_sources", {"sources": [source]})
+        )
+        assert first["candidates_created"] == 1
+        assert first["skipped"] == 0
+
+        second = json.loads(
+            await handle_tool_call("ingest_sources", {"sources": [source]})
+        )
+        assert second["candidates_created"] == 0
+        assert second["skipped"] == 1
+
+    @pytest.mark.asyncio
+    async def test_accept_extracted_node_ambiguous_does_not_auto_merge(self, vault, tmp_path):
+        # Create a vault note with a specific project and tags
+        from linked_notes_mcp.server import init_graph
+
+        (tmp_path / "existing-service.md").write_text(
+            "---\ntitle: Existing Service\nentity_type: service\n"
+            "project: myproj\ntags: [sharedtag]\nsummary: An existing service.\n---\n"
+            "Body text.\n"
+        )
+        init_graph(tmp_path)
+
+        # Ingest content that matches by project+tags (score 4) but not title
+        run = json.loads(
+            await handle_tool_call(
+                "ingest_sources",
+                {
+                    "project": "myproj",
+                    "sources": [
+                        {
+                            "type": "text",
+                            "name": "different-name",
+                            "content": (
+                                "---\nproject: myproj\ntags: [sharedtag]\n---\n"
+                                "# Different Service Name\nRelated service in myproj."
+                            ),
+                        }
+                    ],
+                },
+            )
+        )
+        candidates = json.loads(
+            await handle_tool_call("review_extracted_nodes", {"run_id": run["run_id"]})
+        )
+        # Find a candidate with "ambiguous" recommendation (merge_into_existing strategy)
+        ambiguous = [c for c in candidates if c.get("recommendation") == "ambiguous"]
+        if not ambiguous:
+            pytest.skip("No ambiguous candidate produced; dedup scoring may differ")
+
+        candidate_id = ambiguous[0]["id"]
+        result = json.loads(
+            await handle_tool_call("accept_extracted_node", {"candidate_id": candidate_id})
+        )
+        assert result["status"] == "success"
+        # Must NOT auto-merge — action is "accepted", not "merged"
+        assert result["action"] == "accepted"
+        # Must include merge_suggestion pointing at the matched note
+        assert "merge_suggestion" in result
+        assert result["merge_suggestion"]["target_note_id"] is not None
+
+    @pytest.mark.asyncio
+    async def test_accept_extracted_node_writes_provenance(self, vault):
+        run = json.loads(
+            await handle_tool_call(
+                "ingest_sources",
+                {
+                    "sources": [
+                        {
+                            "type": "text",
+                            "name": "provenance-test",
+                            "content": "# Provenance Test Node\nContent for provenance testing.",
+                        }
+                    ],
+                },
+            )
+        )
+        candidates = json.loads(
+            await handle_tool_call("review_extracted_nodes", {"run_id": run["run_id"]})
+        )
+        create_new = [c for c in candidates if c.get("recommendation") == "create_new"]
+        assert create_new, "Expected at least one create_new candidate"
+        candidate_id = create_new[0]["id"]
+
+        result = json.loads(
+            await handle_tool_call("accept_extracted_node", {"candidate_id": candidate_id})
+        )
+        assert result["status"] == "success"
+
+        note_id = result["note"]["id"]
+        from linked_notes_mcp.server import _graph
+
+        note = _graph.get_note(note_id)
+        assert note is not None
+        assert note.frontmatter.get("confidence") is not None
+        assert note.frontmatter.get("last_reviewed") is not None
+        assert note.frontmatter.get("derived_from") is not None
+
+    @pytest.mark.asyncio
+    async def test_ingest_directory_glob_relative_to_vault(self, vault):
+        # Write a markdown file directly inside the vault directory
+        (vault / "glob-target.md").write_text("# Glob Target\nContent for glob test.")
+
+        result = json.loads(
+            await handle_tool_call(
+                "ingest_sources",
+                {
+                    "sources": [{"type": "glob", "pattern": "glob-target.md"}],
+                },
+            )
+        )
+        assert result["artifacts"] == 1, "Glob should resolve relative to vault path"
+        candidates = json.loads(
+            await handle_tool_call("review_extracted_nodes", {"run_id": result["run_id"]})
+        )
+        assert any("Glob Target" in c["title"] for c in candidates)
+
+    @pytest.mark.asyncio
+    async def test_ingest_sources_chunks_long_doc(self, vault):
+        long_doc = (
+            "# Main Document\n\n"
+            "Preamble text that provides context.\n\n"
+            "## Section One\n\n"
+            + ("Content for section one. " * 10) + "\n\n"
+            "## Section Two\n\n"
+            + ("Content for section two. " * 10) + "\n\n"
+            "## Section Three\n\n"
+            + ("Content for section three. " * 10) + "\n"
+        )
+        result = json.loads(
+            await handle_tool_call(
+                "ingest_sources",
+                {
+                    "sources": [
+                        {"type": "text", "name": "long-doc", "content": long_doc}
+                    ],
+                },
+            )
+        )
+        assert result["candidates_created"] >= 3, (
+            f"Expected ≥3 candidates from chunked doc, got {result['candidates_created']}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # get_note_summary

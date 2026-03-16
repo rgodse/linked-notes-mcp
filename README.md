@@ -3,29 +3,20 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-`linked-notes-mcp` is a graph-first local memory layer for AI agents built on MCP. It keeps markdown notes structured, retrievable, and maintainable so local agent memory does not collapse into an unstructured pile of `.md` files.
+Graph-first local memory layer for AI agents built on MCP. Notes live on disk as markdown. Links and frontmatter become graph edges. Retrieval uses both text and graph structure. Humans can inspect and edit everything.
 
-The core idea is simple: agent memory should be local, editable, and structurally explicit. Notes live on disk as markdown. Links and frontmatter become graph edges. Retrieval can use both text and graph structure. Humans can inspect the result at any time.
+Built for agent-authored memory: notes are optimized for retrieval, review, and long-term maintenance using structured frontmatter (`entity_type`, `summary`, `status`, `importance`, `confidence`, `last_reviewed`). Works for technical and non-technical work alike.
 
-It is designed for agent-authored memory first: notes are optimized for retrieval, review, and long-term maintenance using frontmatter fields like `entity_type`, `summary`, `status`, `importance`, `confidence`, and `last_reviewed`.
+## Why graph memory
 
-The model is domain-agnostic and works for technical and non-technical work alike: projects, repositories, services, issues, stakeholders, meetings, research, initiatives, and workstreams.
+Plain search tells you which notes mention a word. Graph retrieval answers questions like:
 
-## At A Glance
+- what is blocking this work
+- what depends on this service
+- which decision affects this project
+- what context should I read next
 
-- local-first markdown memory for AI-assisted work
-- graph-shaped retrieval over notes, links, and typed relationships
-- human-inspectable and editable instead of opaque vector memory
-- MCP server for agents plus a local browser visualizer for humans
-- especially useful when you keep re-explaining project context across sessions
-
-## Why I Built This
-
-I built this because I kept having to re-explain project context to my AI agent.
-
-Chat history was too fragile, and plain notes were too flat to preserve decisions, dependencies, and work relationships across sessions. I wanted a local, inspectable memory layer that both humans and agents could reuse over time.
-
-That pushed the design toward markdown as the source of truth, graph structure for context, and maintenance workflows to keep the memory usable instead of letting it collapse into note sprawl.
+That matters because most real project questions are about relationships, not documents in isolation. Notes are nodes, wikilinks are edges, and frontmatter fields like `depends_on`, `blocks`, and `related_to` create typed edges you can traverse and filter.
 
 ## Quick Start
 
@@ -44,79 +35,11 @@ uv sync
 uv run python scripts/run_linked_notes_ui.py /path/to/your/notes
 ```
 
-Then open the printed `http://127.0.0.1:8765` URL in your browser.
-
-Status:
-
-- MCP layer is usable today for structured local memory workflows
-- local visualizer is usable now, but still an early workbench rather than a polished product UI
-
-## Thesis
-
-Most local note-based memory fails for agents for the same reason it fails for humans at scale: the notes exist, but the structure does not.
-
-`linked-notes-mcp` is built around a narrower claim:
-
-- keep the source of truth local
-- keep the memory human-readable
-- keep the structure explicit enough for agents to retrieve and maintain it
-
-This is not a cognition stack. It is the durable memory layer underneath one.
-
-## Who This Is For
-
-This project is a good fit if you want:
-
-- local-first agent memory
-- durable project and decision context across sessions
-- a shared memory format that humans can inspect and edit
-- structured notes instead of free-form markdown sprawl
-- compatibility across MCP clients and agents
-
-It is a poor fit if you want:
-
-- a hosted memory product
-- passive memory of every conversation without curation
-- a replacement for short-term working context
-- a generic database for arbitrary high-volume event logging
-
-## Why This Exists
-
-Most AI memory ends up in one of three forms:
-
-- chat transcripts that are hard to reuse
-- vector memory that is hard to inspect
-- plain notes with weak structural context
-
-`linked-notes-mcp` is for the case where you want memory to be:
-
-- local and portable
-- readable and editable without proprietary tooling
-- graph-shaped instead of flat
-- durable across sessions and across different MCP clients
-- maintainable by both humans and agents
-
-This makes it a good fit for open source use. The value is not monetization or hosted infrastructure. The value is having a shared memory graph that stays under your control.
-
-## Why Graph Memory
-
-This repo is optimized for explicit memory:
-
-- notes are nodes
-- wikilinks and markdown links are edges
-- frontmatter relationships create typed edges like `depends_on`, `blocks`, and `related_to`
-- retrieval can expand from a note through the graph instead of only doing text search
-
-That makes memory:
-
-- inspectable
-- deterministic
-- easy to edit by hand
-- better suited to project context, dependencies, decisions, and followups
+Then open `http://127.0.0.1:8765` in your browser.
 
 ## Agent-First Note Shape
 
-Prefer notes with machine-friendly frontmatter like this:
+Prefer notes with machine-friendly frontmatter:
 
 ```yaml
 ---
@@ -137,15 +60,17 @@ related_to:
 Why these fields matter:
 
 - `aliases` makes lookup more forgiving
-- `entity_type` helps agents separate projects, services, decisions, and sessions
-- `project` lets retrieval group notes by workstream
-- `status` helps distinguish active vs stale memory
-- `summary` gives a short retrieval target that is better than scraping prose from the body
-- `importance`, `confidence`, and `last_reviewed` help ranking and memory quality checks
+- `entity_type` lets agents separate projects, services, decisions, and sessions
+- `project` groups notes by workstream
+- `status` distinguishes active vs stale memory
+- `summary` gives a short retrieval target better than scraping prose
+- `importance`, `confidence`, `last_reviewed` drive health scoring and maintenance
+
+The body still matters, but treat it as supporting detail. Frontmatter carries the retrieval-critical facts.
 
 ## Features
 
-- zero config markdown vaults
+- zero config markdown vaults — point at any folder of `.md` files
 - wikilink support: `[[Target]]` and `[[Target|Label]]`
 - standard markdown links
 - typed graph relationships from frontmatter
@@ -153,76 +78,237 @@ Why these fields matter:
 - graph-first context retrieval
 - staged seed ingestion for local files and inline text
 - write tools for persistent agent memory
-- Obsidian-compatible markdown folders
+- local browser visualizer
+- Obsidian-compatible
 
-## Selling Point
+## Tools
 
-The selling point is not "an MCP for notes."
+### Graph Tools
 
-The selling point is: `linked-notes-mcp` gives agents a shared markdown memory graph that humans can inspect, edit, and improve over time.
+| Tool | What it is good for |
+|------|----------------------|
+| `list_relationships(identifier, direction?, relation_type?)` | Inspect explicit memory edges for a note |
+| `get_graph_context(identifier, depth?, limit?, relation_types?)` | Expand nearby nodes and edges around an anchor note |
+| `traverse(start_id, depth?, direction?, relation_types?)` | Walk the graph outward |
+| `find_path(start_id, end_id)` | See how two notes connect |
+| `list_tags()` | Tag inventory with usage counts |
+| `notes_by_tag(tag)` | All notes with a specific tag |
+| `graph_summary()` | Quick structural overview of the vault |
+| `list_notes(limit?)` | List all notes (brief info) |
+| `rebuild()` | Refresh the index after file changes |
 
-That matters because it means:
+### Retrieval Tools
 
-- project context survives beyond one chat
-- decisions and dependencies become explicit instead of implied
-- memory can be reviewed and cleaned up with dashboard and lint tools
-- the same vault can be used across Claude, Codex, and other MCP clients
+| Tool | What it is good for |
+|------|----------------------|
+| `get_context(query, limit?, graph_depth?, graph_limit?)` | Search notes and expand graph context around the best match |
+| `search(query, limit?)` | Raw text search |
+| `get_note(identifier)` | Full note read |
+| `get_note_summary(identifier, max_chars?)` | Cheap preview before loading a full note |
+| `list_stale_notes()` | Notes whose `expires` frontmatter date is in the past |
 
-Another way to say it:
+### Write Tools
 
-`linked-notes-mcp` lets agents build a persistent knowledge graph of your work that survives across sessions and tools without giving up local control.
+| Tool | What it is good for |
+|------|----------------------|
+| `create_from_template(template, fields, ...)` | Start new notes from a consistent shape |
+| `upsert_memory_node(...)` | Create or update a structured memory node with agent-friendly frontmatter |
+| `update_relationships(identifier, add?, remove?, replace?)` | Edit graph relationships without rewriting note bodies |
+| `create_note(title, content, tags?, filename?)` | Create new notes |
+| `update_note(identifier, content?, title?, tags?)` | Replace note content or metadata |
+| `append_to_note(identifier, content)` | Add updates without replacing the whole note |
+| `delete_note(identifier)` | Delete a note from the vault |
+| `save_session_summary(...)` | Structured session memory |
+| `save_decision(...)` | Decision log with rationale |
+| `add_followup(topic, reminder)` | Persistent reminder across sessions |
+| `list_followups()` | List all pending followup reminders |
+| `dismiss_followup(id)` | Remove a followup reminder by ID |
 
-## Practical Use Cases
+### Maintenance Tools
 
-### Project continuity
+| Tool | What it is good for |
+|------|----------------------|
+| `lint_memory_graph()` | Find weak nodes missing structure or freshness metadata |
+| `suggest_relationships(limit?)` | Propose likely graph edges from shared structure |
+| `merge_memory_nodes(source, target)` | Merge duplicate or overlapping memory nodes |
+| `get_memory_health(identifier?)` | Score nodes by retrieval-readiness |
+| `review_relationship_suggestions(...)` | See pending/accepted/rejected suggestions |
+| `accept_relationship_suggestion(...)` | Apply a reviewed relationship suggestion |
+| `reject_relationship_suggestion(...)` | Record a rejected suggestion so it stops resurfacing |
+| `memory_dashboard(...)` | Compact view of weak notes, stale notes, and pending suggestions |
+| `promote_to_memory_node(...)` | Convert raw work output into a structured memory node |
 
-Start a new session by asking for context on a project. Instead of re-explaining the entire background, the agent can pull the project note, nearby services, recent decisions, and open followups from the graph.
+### Ingestion Tools
 
-### Decision archaeology
+| Tool | What it is good for |
+|------|----------------------|
+| `ingest_sources(...)` | Stage candidate memory nodes from local files, directories, glob patterns, or inline text |
+| `list_ingestion_runs(...)` | Review recent staged ingestion runs |
+| `review_extracted_nodes(...)` | Inspect candidates before promotion |
+| `accept_extracted_node(...)` | Promote a candidate into the graph (exact duplicates auto-merge; ambiguous matches surface a `merge_suggestion`) |
+| `reject_extracted_node(...)` | Reject a low-value candidate |
+| `merge_extracted_node(...)` | Merge a candidate into a specific existing note |
+| `accept_all_candidates(...)` | Bulk-accept pending candidates for a run |
+| `reject_all_candidates(...)` | Bulk-reject pending candidates for a run |
 
-When someone asks "why did we choose this?", the graph can connect a project or service node to the decision note that justified it, and then to supporting research or meetings.
+## LLM-Assisted Ingestion
 
-### Blocker tracing
+`ingest_sources` can call an LLM to extract multiple structured memory node candidates from each document — including entities that a simple heuristic would miss. It falls back to heading-based chunking (H2/H3 sections) when no LLM is configured.
 
-When work is stuck, graph retrieval can follow `blocked_by`, `blocks`, and `depends_on` relationships instead of relying on raw keyword matches.
+### Configuration
 
-### Handoffs and onboarding
+Create a config file. The server checks in this order:
 
-A new agent or teammate can start from a project node and expand outward through services, issues, decisions, and stakeholders instead of reading a flat directory of notes.
+1. **Vault-local** `<vault>/.linked-notes-config.json` — per-vault override (add to `.gitignore`)
+2. **Global** `~/.config/linked-notes-mcp/config.json` — applies to all vaults
 
-### Seeded memory plus ongoing enrichment
+```json
+{
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "api_key": "YOUR_KEY_HERE",
+    "base_url": null
+  }
+}
+```
 
-The long-term direction is to ingest source material up front, stage structured memory candidates, and then let normal conversation flows keep enriching the accepted graph over time.
+Set `provider` to match your API:
 
-## Workflow Story
+| Provider | `provider` value | `base_url` |
+|----------|-----------------|------------|
+| OpenAI | `openai` | *(leave null)* |
+| Anthropic (Claude) | `anthropic` | *(leave null)* |
+| Google Gemini | `openai_compatible` | `https://generativelanguage.googleapis.com/v1beta/openai/` |
+| Groq | `openai_compatible` | `https://api.groq.com/openai/v1` |
+| Ollama (local) | `openai_compatible` | `http://localhost:11434/v1` |
+| Any OpenAI-compatible API | `openai_compatible` | *(your endpoint)* |
 
-The easiest way to understand the project is as a workflow change, not just a storage format.
+Install the matching SDK:
 
-Example:
+```bash
+# For OpenAI, Gemini, Groq, Ollama, or any OpenAI-compatible API
+uv add "linked-notes-mcp[llm-openai]"
 
-1. An agent analyzes a repository or project workspace.
-2. It writes durable notes about services, decisions, issues, and dependencies into the local graph.
-3. A future session starts from those notes instead of from zero.
-4. The next agent can trace blockers, understand architecture, and recover prior reasoning without re-reading everything.
+# For Anthropic
+uv add "linked-notes-mcp[llm-anthropic]"
 
-That is the value of the system: context becomes a persistent graph instead of a one-session artifact.
+# Both
+uv add "linked-notes-mcp[llm]"
+```
 
-## Why Graph Retrieval Helps
+### Environment variable fallback
 
-Plain search tells you which notes mention a word.
+If no config file is present, the server reads env vars:
 
-Graph retrieval helps answer questions like:
+```bash
+# Generic (any OpenAI-compatible endpoint)
+LLM_API_KEY=...   LLM_MODEL=gpt-4o-mini   LLM_BASE_URL=https://...   LLM_PROVIDER=openai_compatible
 
-- what is blocking this work
-- what depends on this service
-- which decision affects this project
-- what context should I read next
+# Legacy — still supported
+ANTHROPIC_API_KEY=...
+OPENAI_API_KEY=...
+```
 
-That is useful because many real work questions are about relationships, not documents in isolation.
+### How extraction works
+
+1. If an LLM is configured, a single API call extracts all distinct entities from the document as separate candidates.
+2. If no LLM is configured, the document is split on H2/H3 headings (when ≥ 2 headings exist and the document is > 300 chars) — each section becomes one candidate.
+3. Re-running `ingest_sources` on the same file or text is safe — already-seen content is detected by checksum and skipped.
+4. Accepted notes carry provenance frontmatter (`confidence`, `last_reviewed`, `source_refs`, `derived_from`).
+
+### Workflow Tools
+
+| Tool | What it is good for |
+|------|----------------------|
+| `start_session(...)` | Build a compact working brief from search, graph context, followups, stale notes, and recent sessions |
+| `review_memory(...)` | Combined queue of weak notes, stale notes, relationship suggestions, and pending ingestion candidates |
+| `review_queue(...)` | Prioritized triage queue of highest-value memory actions |
+| `end_session(...)` | Save a session summary, update touched notes, create followups for open items |
+
+## Templates
+
+Use `create_from_template(template, fields)` with any of these:
+
+| Template | Use for |
+|----------|---------|
+| `repo_project` | Codebases and repositories |
+| `service` | Systems and components |
+| `issue` | Bugs and blockers |
+| `initiative` | Cross-team programs |
+| `workstream` | Ongoing processes |
+| `stakeholder` | People and teams |
+| `research` | Findings and supporting evidence |
+| `project` | General projects |
+| `decision` | Architectural and product choices |
+| `meeting` | Meeting notes and outcomes |
+| `session` | End-of-session summaries |
+| `idea` | Proposals and explorations |
+| `bug` | Bug reports |
+| `learning` | Learnings and reference notes |
+
+**Template-first workflow:**
+1. Call `list_templates()` to see available shapes
+2. Use `create_from_template(...)` for new notes whenever possible
+3. Refine with `upsert_memory_node(...)` for stronger machine-friendly frontmatter
+4. Use `promote_to_memory_node(...)` for messy raw output after the fact
+
+## Suggested Workflow
+
+### Session start
+
+1. `get_context("project or topic")` to bootstrap context
+2. If one note is clearly central, call `get_graph_context` on it
+3. Check `list_relationships` before making changes
+4. Use `memory_dashboard()` for a compact view of what needs maintenance
+
+### During work
+
+1. Update notes with new links and frontmatter relationships
+2. Prefer `create_from_template` for new notes, refine with `upsert_memory_node` and `update_relationships`
+3. Save decisions explicitly with `save_decision`
+4. `add_followup` for anything that should survive the session
+
+### Session end
+
+1. `end_session(...)` — saves summary, links touched notes, handles followups
+
+### Maintenance pass
+
+1. `lint_memory_graph()`
+2. `review_relationship_suggestions()` — accept or reject
+3. `merge_memory_nodes(...)` for duplicates
+4. Refresh `last_reviewed`, `importance`, `confidence` on key notes
+
+## Graph Model
+
+### Inline links
+
+```md
+[[Auth Service]]
+[Database Design](database-design.md)
+```
+
+### Typed relationships (frontmatter)
+
+```yaml
+---
+title: API Gateway
+depends_on:
+  - Auth Service
+  - Database Design
+blocks:
+  - Deployment Strategy
+related_to:
+  - User Service
+---
+```
+
+Supported relationship fields: `depends_on`, `blocks`, `blocked_by`, `related_to`, `part_of`, `contains`, `decision_for`, `decided_by`, `supersedes`, `superseded_by`
 
 ## Installation
 
-The package is not published to PyPI yet. Use one of these install paths instead.
+Not yet published to PyPI. Use one of these:
 
 ### One-off with `uvx`
 
@@ -238,34 +324,6 @@ cd linked-notes-mcp
 uv sync
 uv run python scripts/run_linked_notes_mcp.py /path/to/your/notes
 ```
-
-The launcher script imports from `src/` directly, which keeps local-clone MCP setups working even if an environment's editable install support is unreliable.
-
-## Codex Configuration
-
-Add this to `~/.codex/config.toml`:
-
-```toml
-[features]
-rmcp_client = true
-
-[mcp_servers.linked_notes]
-command = "uvx"
-args = ["--from", "git+https://github.com/rgodse/linked-notes-mcp", "linked-notes-mcp", "/path/to/your/notes"]
-```
-
-Or, if you cloned the repo locally:
-
-```toml
-[features]
-rmcp_client = true
-
-[mcp_servers.linked_notes]
-command = "uv"
-args = ["run", "--directory", "/absolute/path/to/linked-notes-mcp", "python", "scripts/run_linked_notes_mcp.py", "/path/to/your/notes"]
-```
-
-Restart Codex after updating the config.
 
 ## Claude Desktop Configuration
 
@@ -287,247 +345,80 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-## Graph Model
+## Codex Configuration
 
-### Inline links
+Add to `~/.codex/config.toml`:
 
-Markdown content creates regular graph edges:
+```toml
+[features]
+rmcp_client = true
 
-```md
-[[Auth Service]]
-[Database Design](database-design.md)
+[mcp_servers.linked_notes]
+command = "uvx"
+args = ["--from", "git+https://github.com/rgodse/linked-notes-mcp", "linked-notes-mcp", "/path/to/your/notes"]
 ```
 
-### Typed relationships
+Or with a local clone:
 
-Frontmatter creates explicit semantic edges:
+```toml
+[features]
+rmcp_client = true
 
-```yaml
----
-title: API Gateway
-tags: [architecture, backend]
-depends_on:
-  - Auth Service
-  - Database Design
-blocks:
-  - Deployment Strategy
-related_to:
-  - User Service
----
+[mcp_servers.linked_notes]
+command = "uv"
+args = ["run", "--directory", "/absolute/path/to/linked-notes-mcp", "python", "scripts/run_linked_notes_mcp.py", "/path/to/your/notes"]
 ```
 
-Supported relationship fields:
+## Local Visualizer
 
-- `depends_on`
-- `blocks`
-- `blocked_by`
-- `related_to`
-- `part_of`
-- `contains`
-- `decision_for`
-- `decided_by`
-- `supersedes`
-- `superseded_by`
+React Flow-based graph UI over the same local markdown vault. No hosted backend, no CDN, no cloud dependency.
 
-The body should still exist, but treat it as supporting detail. The frontmatter should carry the retrieval-critical facts.
+```bash
+uv run python scripts/run_linked_notes_ui.py /path/to/your/notes
+```
 
-## High-Value Tools
+Then open `http://127.0.0.1:8765`.
 
-### Graph Tools
+Supports:
+- `Overview`, `Subsystem`, and `Flow` graph lenses
+- focus-area and detail-level controls
+- node detail with `Note` and `Source` modes
+- local source previews from repo evidence with line-aware file previews
+- persistent local UI state
 
-| Tool | What it is good for |
-|------|----------------------|
-| `list_relationships(identifier, direction?, relation_type?)` | Inspect explicit memory edges for a note |
-| `get_graph_context(identifier, depth?, limit?, relation_types?)` | Expand nearby nodes and edges around an anchor note |
-| `traverse(start_id, depth?, direction?, relation_types?)` | Walk the graph outward |
-| `find_path(start_id, end_id)` | See how two notes connect |
-| `graph_summary()` | Quick structural overview of the vault |
+To rebuild the UI after editing:
 
-### Retrieval Tools
+```bash
+npm install
+npm run build:ui
+```
 
-| Tool | What it is good for |
-|------|----------------------|
-| `get_context(query, limit?, graph_depth?, graph_limit?)` | Search notes and also expand graph context around the best match |
-| `search(query, limit?)` | Raw text search |
-| `get_note_summary(identifier, max_chars?)` | Cheap preview before loading a full note |
-| `get_note(identifier)` | Full note read |
+Built assets are served from `src/linked_notes_mcp/static/`.
 
-### Write Tools
-
-| Tool | What it is good for |
-|------|----------------------|
-| `create_from_template(template, fields, ...)` | Start new notes from a consistent shape instead of inventing structure each time |
-| `upsert_memory_node(...)` | Create or update a structured memory node with agent-friendly frontmatter |
-| `update_relationships(identifier, add?, remove?, replace?)` | Edit graph relationships without rewriting note bodies |
-| `create_note(title, content, tags?, filename?)` | Create new notes |
-| `update_note(identifier, content?, title?, tags?)` | Replace note content or metadata |
-| `append_to_note(identifier, content)` | Add updates without replacing the whole note |
-| `save_session_summary(...)` | Structured session memory |
-| `save_decision(...)` | Decision log with rationale |
-| `add_followup(topic, reminder)` | Persistent reminder across sessions |
-
-### Maintenance Tools
-
-| Tool | What it is good for |
-|------|----------------------|
-| `lint_memory_graph()` | Find weak nodes missing structure or freshness metadata |
-| `suggest_relationships(limit?)` | Propose likely graph edges from shared structure |
-| `merge_memory_nodes(source, target)` | Merge duplicate or overlapping memory nodes |
-| `get_memory_health(identifier?)` | Score nodes by retrieval-readiness |
-| `review_relationship_suggestions(...)` | See pending/accepted/rejected suggestions |
-| `accept_relationship_suggestion(...)` | Apply a reviewed relationship suggestion |
-| `reject_relationship_suggestion(...)` | Record a rejected suggestion so it stops resurfacing |
-| `memory_dashboard(...)` | Compact operational view of weak notes, stale notes, and pending suggestions |
-| `promote_to_memory_node(...)` | Convert raw work output into a structured memory node |
-
-### Ingestion Tools
-
-| Tool | What it is good for |
-|------|----------------------|
-| `ingest_sources(...)` | Stage candidate memory nodes from local files, directories, glob patterns, or inline text |
-| `list_ingestion_runs(...)` | Review recent staged ingestion runs |
-| `review_extracted_nodes(...)` | Inspect candidates before promotion, with recommendation filtering |
-| `accept_extracted_node(...)` | Promote a candidate into the graph or merge a clear match |
-| `reject_extracted_node(...)` | Reject a low-value candidate and keep review history |
-| `merge_extracted_node(...)` | Merge a candidate into a specific existing note |
-| `accept_all_candidates(...)` | Bulk-accept pending candidates for a run |
-| `reject_all_candidates(...)` | Bulk-reject pending candidates for a run |
-
-### Workflow Tools
-
-| Tool | What it is good for |
-|------|----------------------|
-| `start_session(...)` | Build a compact working brief from search, graph context, followups, stale notes, and recent sessions |
-| `review_memory(...)` | Review one combined queue of weak notes, stale notes, relationship suggestions, and pending ingestion candidates |
-| `review_queue(...)` | Get a compact prioritized triage queue of the highest-value memory actions |
-| `end_session(...)` | Save a session summary, update touched notes, and create followups for open items |
-
-### Template Coverage
-
-Templates now cover both technical and non-technical work:
-
-- `repo_project`
-- `service`
-- `issue`
-- `initiative`
-- `workstream`
-- `stakeholder`
-- `research`
-- `project`
-- `meeting`
-- `decision`
-- `session`
-- `idea`
-- `learning`
-
-## Template-First Workflow
-
-The best experience with this MCP is template-first, not free-form note creation.
-
-Recommended pattern:
-
-1. Start with `list_templates()` when entering a new domain or workflow.
-2. Use `create_from_template(...)` for the first version of a note whenever possible.
-3. Use `upsert_memory_node(...)` when you need stronger machine-friendly frontmatter or want to refine an existing note.
-4. Use `promote_to_memory_node(...)` for messy raw output that should become structured memory after the fact.
-
-In practice:
-
-- use `repo_project` for codebases and repositories
-- use `service` for systems and components
-- use `issue` for bugs and blockers
-- use `decision` for architectural choices
-- use `session` for end-of-session summaries
-- use `research`, `initiative`, `workstream`, and `stakeholder` for broader operating context
-
-Followups are stored in `.linked_notes_followups.json` in the vault root. Add that file to `.gitignore` if you do not want reminders committed.
-
-## Known Limitations
-
-This project is intentionally opinionated and still early.
+## Known Limitations and Roadmap
 
 Current limits:
+- works best when notes use structured frontmatter consistently
+- optimized for durable explicit memory, not full conversational recall
+- graph quality depends on review and maintenance over time
+- local UI is functional but still an early workbench
 
-- it works best when notes use structured frontmatter consistently
-- it is optimized for durable explicit memory, not full conversational recall
-- graph quality still depends on review and maintenance over time
-- mutation and retrieval behavior are tested, but the project is still evolving quickly
-- staged seed ingestion supports files, directories, globs, and inline text, but extraction is still conservative and usually produces one candidate per source
-- the local UI is now usable for focused graph exploration, but it is still an early workbench rather than a finished product surface
+Planned directions:
+- `repo-context-mcp` — durable repository and codebase memory as a companion producer
+- `jira-context-mcp`, `meeting-context-mcp`, `research-context-mcp` — domain-specific memory producers writing into the same local graph
+- graph diff for understanding how memory changes over time
+- improved graph readability and richer repo/process-specific note generation
 
-Planned next step:
+The design rule for companion producers: don't mirror source systems wholesale — extract only durable, high-value context and emit structured notes with typed relationships into the local graph.
 
-- improve graph readability, onboarding, and richer repo/process-specific note generation so the local UI becomes a stronger daily work surface
+## Comparison with Adjacent Tools
 
-## Next Steps
-
-The most likely direction from here is not turning `linked-notes-mcp` into a larger all-in-one system. It is keeping this repo as the local memory substrate and validating a small set of companion add-ons that write durable, graph-shaped memory into it.
-
-The clearest next add-on is:
-
-- `repo-context-mcp` for durable repository and codebase memory
-
-Strong future directions after that:
-
-- `jira-context-mcp` for durable execution memory around epics, blockers, dependencies, and workstreams
-- `research-context-mcp` for durable research notes, findings, and supporting evidence
-- `meeting-context-mcp` for decisions, followups, and operating context that should survive beyond one call
-- business-process or operating-context ingestion for recurring workflows, owners, risks, and exceptions
-- `context packs` for compact agent-ready bundles around a project, service, or domain
-- `graph diff` for understanding how repo, process, or project memory changes over time
-- graph hygiene improvements such as stale-node detection, pruning, and better maintenance workflows
-- pragmatic schema guardrails for templates and agent-authored frontmatter
-- lightweight temporal metadata for freshness and validity tracking
-
-Priority guidance:
-
-1. build memory producers that add durable high-value context
-2. improve retrieval and maintenance around that context
-3. add operational hardening only when scale and multi-agent use actually require it
-
-The design rule for these add-ons is simple:
-
-- do not mirror source systems wholesale
-- extract only durable, high-value context
-- emit structured notes and typed relationships into the same local graph
-
-This is intentionally framed as a validation direction, not a committed build plan. The right next move is to test whether people actually want domain-specific memory producers on top of a shared local memory layer.
-
-## Suggested Workflow
-
-### Session start
-
-1. Ask for `get_context("project or topic")`
-2. If one note is clearly central, call `get_graph_context` on it
-3. Traverse or inspect `list_relationships` before making changes
-4. Use `memory_dashboard()` when you want a compact view of what needs maintenance
-
-### During work
-
-1. Update notes with new links and frontmatter relationships
-2. Prefer `create_from_template` for new notes, then refine with `upsert_memory_node` and `update_relationships`
-3. Save decisions explicitly
-4. Add followups for anything that should survive the session
-5. Use `promote_to_memory_node` when you have raw notes or messy outputs that should become structured memory
-
-### Session end
-
-1. Save a structured session summary
-2. Link it to the project or decision notes it touched
-3. Add or dismiss followups
-
-### Maintenance pass
-
-Run this periodically:
-
-1. `lint_memory_graph()`
-2. `get_memory_health()`
-3. `review_relationship_suggestions()`
-4. accept or reject good suggestions
-5. `merge_memory_nodes(...)` for duplicates
-6. refresh `last_reviewed`, `importance`, and `confidence`
-
-Accepted and rejected suggestions are tracked over time, and review confidence is surfaced alongside future suggestions.
+| Project | Primary model | How `linked-notes-mcp` differs |
+|---------|---------------|--------------------------------|
+| [Anthropic Memory MCP](https://modelcontextprotocol.io/examples) | local knowledge graph with entities, relations, observations | markdown-vault-first; optimized for human-editable durable notes rather than a standalone entity store |
+| [Vault MCP / Obsidian MCP Plugin](https://github.com/jlevere/obsidian-mcp-plugin) | Obsidian vault access through MCP | more opinionated about graph shape, typed relationships, maintenance, and agent-first workflows |
+| [knowledgegraph-mcp](https://github.com/n-r-w/knowledgegraph-mcp) | knowledge graph with SQLite/PostgreSQL backends | keeps markdown as the canonical layer; leans harder on inspectability, staged review, and human-maintained quality |
+| [RepoMemory](https://mcpmarket.com/server/repomemory) | repo-aware memory graph backed by SQLite | broader than repo memory; treats repo intelligence as one future producer writing into a general local graph |
 
 ## Development
 
@@ -539,53 +430,6 @@ uv run pytest
 uv run python scripts/run_linked_notes_mcp.py /path/to/test/vault
 ```
 
-## Local Visualizer
-
-There is now a local-only graph workbench for exploring the vault in the browser without sending anything to the cloud.
-
-What it is:
-
-- React Flow-based graph UI over the same local markdown vault
-- focused views for repo, subsystem, and flow exploration
-- collapsible controls, resizable detail panel, and optional charcoal theme
-- separate local source view for repo-backed notes with line-aware file previews
-- read-first interface over the existing graph, not a new hosted service
-
-Run it like this:
-
-```bash
-uv run python scripts/run_linked_notes_ui.py /path/to/your/notes
-```
-
-Then open the printed `http://127.0.0.1:8765` URL in your browser.
-
-The current UI supports:
-
-- `Overview`, `Subsystem`, and `Flow` graph lenses
-- focus-area and detail-level controls for denser or cleaner subgraphs
-- node detail inspection with `Note` and `Source` modes
-- local source previews from repo evidence captured in notes
-- persistent local UI state in the browser
-- no hosted backend, no CDN, no cloud dependency
-
-This keeps the core `linked-notes-mcp` idea intact:
-
-- markdown vault remains the source of truth
-- the MCP server and graph model remain the backend
-- the browser UI is a local add-on over the same graph
-- repo and process context are derived into notes, not stored in a separate service
-
-If you are iterating on the UI itself:
-
-```bash
-npm install
-npm run build:ui
-```
-
-The built assets are served from `src/linked_notes_mcp/static/` by the same local Python visualizer process.
-
-For repo and workflow demos, the visualizer is especially useful because it makes the graph legible as a living knowledge structure instead of a directory of notes. Over time this should become a stronger storytelling surface with better example graphs, screenshots, and denser repo/process walkthroughs.
-
 ## Docs
 
 - [Quickstart](docs/QUICKSTART.md)
@@ -595,36 +439,6 @@ For repo and workflow demos, the visualizer is especially useful because it make
 - [Seed Context Ingestion Spec](docs/INGESTION-SPEC.md)
 - [UX Roadmap](docs/UX-ROADMAP.md)
 - [Visualizer Spec](docs/VISUALIZER-SPEC.md)
-
-## Comparison with Memory Styles
-
-| Memory style | Strengths | Weaknesses |
-|--------------|-----------|------------|
-| Graph-first markdown memory | Transparent, editable, deterministic, good for dependencies/decisions | Requires you to maintain structure |
-| Vector memory | Good fuzzy recall | Opaque, harder to audit, weaker explicit structure |
-| Plain note search | Simple | Misses structural context |
-
-linked-notes-mcp is for the case where you want agent memory to be a real graph you can inspect and control, not just a retrieval backend.
-
-## Comparison with Adjacent Tools
-
-This project is not the only tool in the persistent-memory or MCP-notes space. The difference is the combination of design choices:
-
-- markdown vault as the source of truth
-- typed graph relationships from frontmatter and links
-- explicit maintenance and review workflows
-- local-first browser visualizer over the same graph
-
-Some adjacent tools:
-
-| Project | Primary model | Main emphasis | How `linked-notes-mcp` differs |
-|---------|---------------|---------------|---------------------------------|
-| [Anthropic Memory MCP](https://modelcontextprotocol.io/examples) | local knowledge graph with entities, relations, and observations | general persistent memory for MCP clients | `linked-notes-mcp` is markdown-vault-first and optimized for human-editable durable notes rather than a standalone entity store |
-| [Vault MCP / Obsidian MCP Plugin](https://github.com/jlevere/obsidian-mcp-plugin) | Obsidian vault access through MCP | exposing vault files and structured note operations to LLMs | `linked-notes-mcp` is more opinionated about graph shape, typed relationships, maintenance, and agent-first memory workflows |
-| [knowledgegraph-mcp](https://github.com/n-r-w/knowledgegraph-mcp) | knowledge graph memory with SQLite/PostgreSQL backends | persistent graph memory with fuzzy search and multiple storage backends | `linked-notes-mcp` keeps markdown as the canonical layer and leans harder into inspectability, staged review, and human-maintained graph quality |
-| [RepoMemory](https://mcpmarket.com/server/repomemory) | repo-aware memory graph backed by SQLite | continuity for coding agents within a repository | `linked-notes-mcp` is broader than repo memory and treats repo intelligence as one future producer that writes into a general local memory graph |
-
-So the claim here is not "nothing else exists." The claim is that `linked-notes-mcp` combines local markdown durability, graph-native retrieval, maintenance workflows, and a local visual workbench in one coherent memory model.
 
 ## License
 

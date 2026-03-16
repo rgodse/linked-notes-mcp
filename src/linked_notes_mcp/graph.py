@@ -1112,6 +1112,7 @@ class KnowledgeGraph:
         relationships: list[dict[str, str]] | None = None,
         body: str | None = None,
         filename: str | None = None,
+        extra_frontmatter: dict | None = None,
     ) -> Note:
         """Create or update a structured memory node optimized for agent retrieval."""
 
@@ -1136,6 +1137,8 @@ class KnowledgeGraph:
             if status:
                 extra["status"] = status
             extra.update(relationship_fields)
+            if extra_frontmatter:
+                extra.update(extra_frontmatter)
             content_body = body if body is not None else summary
             frontmatter = self._generate_frontmatter(
                 title,
@@ -1162,6 +1165,8 @@ class KnowledgeGraph:
             frontmatter.pop(relation_type, None)
         frontmatter.update(relationship_fields)
         frontmatter["modified"] = datetime.now().isoformat()
+        if extra_frontmatter:
+            frontmatter.update(extra_frontmatter)
 
         body_content = existing.body if body is None else body
         existing.path.write_text(
