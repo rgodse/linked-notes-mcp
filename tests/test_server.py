@@ -987,3 +987,87 @@ class TestListStaleNotesHandler:
         result = json.loads(await handle_tool_call("list_stale_notes", {}))
         for item in result:
             assert "expires" in item
+
+
+# ---------------------------------------------------------------------------
+# LLM extraction (contract test — no real API calls)
+# ---------------------------------------------------------------------------
+
+class TestLLMExtraction:
+    def test_extract_candidates_llm_parses_response(self):
+        """Verify response parsing works without a real API call."""
+        from unittest.mock import MagicMock, patch
+
+        from linked_notes_mcp.extraction import extract_candidates_llm
+
+        fake_arguments = json.dumps({
+            "candidates": [
+                {
+                    "title": "Payments Service",
+                    "entity_type": "service",
+                    "summary": "Handles billing and subscriptions.",
+                    "aliases": ["Payments"],
+                    "tags": ["billing"],
+                    "relationships": [{"type": "depends_on", "target": "Auth Service"}],
+                    "body": "Handles billing.",
+                }
+            ]
+        })
+
+        fake_tool_call = MagicMock()
+        fake_tool_call.function.arguments = fake_arguments
+
+        fake_response = MagicMock()
+        fake_response.choices[0].message.tool_calls = [fake_tool_call]
+
+        # litellm may not be installed in dev; inject a mock module into sys.modules
+        mock_litellm = MagicMock()
+        mock_litellm.completion.return_value = fake_response
+
+        with patch.dict("sys.modules", {"litellm": mock_litellm}):
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+                results = extract_candidates_llm(
+                    content="# Payments Service\nHandles billing.",
+                    display_name="payments",
+                    project="core",
+                )
+
+        assert len(results) == 1
+        assert results[0]["title"] == "Payments Service"
+        assert results[0]["entity_type"] == "service"
+        assert results[0]["tags"] == ["billing"]
+        assert results[0]["relationships"] == [{"type": "depends_on", "target": "Auth Service"}]
+
+        call_kwargs = mock_litellm.completion.call_args.kwargs
+        assert call_kwargs["model"] == "gpt-4o-mini"
+        assert call_kwargs["api_key"] == "test-key"
+        assert any(
+            t["function"]["name"] == "extract_memory_nodes"
+            for t in call_kwargs["tools"]
+        )
+
+    def test_can_use_llm_false_without_config(self, tmp_path):
+        from linked_notes_mcp.extraction import can_use_llm
+
+        with patch.dict("os.environ", {}, clear=True):
+            assert can_use_llm(vault_path=tmp_path) is False
+
+    def test_load_llm_config_from_vault_file(self, tmp_path):
+        from linked_notes_mcp.extraction import load_llm_config
+
+        (tmp_path / ".linked-notes-config.json").write_text(
+            json.dumps({"llm": {"model": "gemini/gemini-1.5-flash", "api_key": "gkey"}})
+        )
+        cfg = load_llm_config(vault_path=tmp_path)
+        assert cfg is not None
+        assert cfg.model == "gemini/gemini-1.5-flash"
+        assert cfg.api_key == "gkey"
+
+    def test_load_llm_config_env_fallback(self, tmp_path):
+        from linked_notes_mcp.extraction import load_llm_config
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "ant-key"}, clear=False):
+            cfg = load_llm_config(vault_path=tmp_path)
+        assert cfg is not None
+        assert cfg.model == "claude-haiku-4-5-20251001"
+        assert cfg.api_key == "ant-key"

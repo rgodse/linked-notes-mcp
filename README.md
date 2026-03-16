@@ -157,43 +157,31 @@ The body still matters, but treat it as supporting detail. Frontmatter carries t
 
 ### Configuration
 
-Create a config file. The server checks in this order:
-
-1. **Vault-local** `<vault>/.linked-notes-config.json` — per-vault override (add to `.gitignore`)
-2. **Global** `~/.config/linked-notes-mcp/config.json` — applies to all vaults
+Create `<vault>/.linked-notes-config.json` (add to `.gitignore`):
 
 ```json
 {
   "llm": {
-    "provider": "openai",
-    "model": "gpt-4o-mini",
-    "api_key": "YOUR_KEY_HERE",
+    "model":    "gpt-4o-mini",
+    "api_key":  "YOUR_KEY_HERE",
     "base_url": null
   }
 }
 ```
 
-Set `provider` to match your API:
+Set `model` using [litellm's model naming](https://docs.litellm.ai/docs/providers):
 
-| Provider | `provider` value | `base_url` |
-|----------|-----------------|------------|
-| OpenAI | `openai` | *(leave null)* |
-| Anthropic (Claude) | `anthropic` | *(leave null)* |
-| Google Gemini | `openai_compatible` | `https://generativelanguage.googleapis.com/v1beta/openai/` |
-| Groq | `openai_compatible` | `https://api.groq.com/openai/v1` |
-| Ollama (local) | `openai_compatible` | `http://localhost:11434/v1` |
-| Any OpenAI-compatible API | `openai_compatible` | *(your endpoint)* |
+| Provider | `model` value |
+|----------|--------------|
+| OpenAI | `gpt-4o-mini` |
+| Anthropic | `claude-haiku-4-5-20251001` |
+| Google Gemini | `gemini/gemini-1.5-flash` |
+| Groq | `groq/llama-3.1-8b-instant` |
+| Ollama (local) | `openai/llama3` + `"base_url": "http://localhost:11434/v1"` |
 
-Install the matching SDK:
+Then install litellm:
 
 ```bash
-# For OpenAI, Gemini, Groq, Ollama, or any OpenAI-compatible API
-uv add "linked-notes-mcp[llm-openai]"
-
-# For Anthropic
-uv add "linked-notes-mcp[llm-anthropic]"
-
-# Both
 uv add "linked-notes-mcp[llm]"
 ```
 
@@ -202,8 +190,8 @@ uv add "linked-notes-mcp[llm]"
 If no config file is present, the server reads env vars:
 
 ```bash
-# Generic (any OpenAI-compatible endpoint)
-LLM_API_KEY=...   LLM_MODEL=gpt-4o-mini   LLM_BASE_URL=https://...   LLM_PROVIDER=openai_compatible
+# Generic
+LLM_API_KEY=...   LLM_MODEL=gpt-4o-mini   LLM_BASE_URL=https://...
 
 # Legacy — still supported
 ANTHROPIC_API_KEY=...

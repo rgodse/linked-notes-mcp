@@ -1,31 +1,30 @@
 """Provider-agnostic LLM extraction for the ingestion pipeline.
 
-Supports any OpenAI-compatible API (OpenAI, Gemini, Codex, Groq, Ollama, ...)
-as well as the native Anthropic SDK.
+Uses litellm so any supported LLM works with a single code path.
+Model names follow litellm routing conventions:
 
-Configuration is loaded in this order (highest to lowest priority):
-  1. Vault-local config: <vault>/.linked-notes-config.json
-  2. Global config:      ~/.config/linked-notes-mcp/config.json
-  3. Env vars:           LLM_PROVIDER / LLM_MODEL / LLM_API_KEY / LLM_BASE_URL
-  4. Legacy env vars:    ANTHROPIC_API_KEY, OPENAI_API_KEY
+  "gpt-4o-mini"                  → OpenAI
+  "claude-haiku-4-5-20251001"    → Anthropic
+  "gemini/gemini-1.5-flash"      → Google Gemini
+  "groq/llama-3.1-8b-instant"    → Groq
+  "openai/llama3"                → Ollama or any OpenAI-compatible endpoint
+                                   (set base_url to your endpoint)
 
-Config file schema (.linked-notes-config.json):
+See https://docs.litellm.ai/docs/providers for the full list.
+
+Configuration (highest to lowest priority):
+  1. Vault config:  <vault>/.linked-notes-config.json
+  2. Env vars:      LLM_MODEL / LLM_API_KEY / LLM_BASE_URL
+  3. Legacy:        ANTHROPIC_API_KEY, OPENAI_API_KEY
+
+Config file schema:
   {
     "llm": {
-      "provider": "openai",          // "openai" | "anthropic" | "openai_compatible"
-      "model":    "gpt-4o-mini",     // any model string your provider accepts
+      "model":    "gpt-4o-mini",
       "api_key":  "YOUR_KEY_HERE",
-      "base_url": null               // set for custom endpoints (Gemini, Ollama, etc.)
+      "base_url": null
     }
   }
-
-Provider notes:
-  - "openai"           → OpenAI API (api.openai.com)
-  - "openai_compatible" → any OpenAI-compatible endpoint; set base_url accordingly
-      Gemini:  https://generativelanguage.googleapis.com/v1beta/openai/
-      Groq:    https://api.groq.com/openai/v1
-      Ollama:  http://localhost:11434/v1
-  - "anthropic"        → Anthropic API via the anthropic SDK
 """
 
 from __future__ import annotations
@@ -36,7 +35,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# JSON schema shared by both provider adapters
 _EXTRACTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -105,24 +103,17 @@ _EXTRACTION_SCHEMA: dict[str, Any] = {
 
 @dataclass
 class LLMConfig:
-    provider: str  # "openai" | "openai_compatible" | "anthropic"
     model: str
     api_key: str
     base_url: str | None = None
 
 
 def load_llm_config(vault_path: Path | None = None) -> LLMConfig | None:
-    """Load LLM config from config files then env var fallbacks."""
+    """Load LLM config from vault config file, then env var fallbacks."""
     if vault_path is not None:
         cfg = _read_config_file(vault_path / ".linked-notes-config.json")
         if cfg is not None:
             return cfg
-
-    global_path = Path.home() / ".config" / "linked-notes-mcp" / "config.json"
-    cfg = _read_config_file(global_path)
-    if cfg is not None:
-        return cfg
-
     return _config_from_env()
 
 
@@ -136,58 +127,47 @@ def _read_config_file(path: Path) -> LLMConfig | None:
     llm = data.get("llm")
     if not isinstance(llm, dict):
         return None
-    provider = llm.get("provider", "openai")
     model = llm.get("model")
     api_key = llm.get("api_key")
     base_url = llm.get("base_url") or None
     if not model or not api_key:
         return None
-    return LLMConfig(provider=provider, model=model, api_key=api_key, base_url=base_url)
+    return LLMConfig(model=model, api_key=api_key, base_url=base_url)
 
 
 def _config_from_env() -> LLMConfig | None:
-    # Generic LLM env vars (highest priority among env vars)
+    # Generic env vars
     api_key = os.environ.get("LLM_API_KEY")
     if api_key:
-        provider = os.environ.get("LLM_PROVIDER", "openai_compatible")
         model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
         base_url = os.environ.get("LLM_BASE_URL") or None
-        return LLMConfig(provider=provider, model=model, api_key=api_key, base_url=base_url)
+        return LLMConfig(model=model, api_key=api_key, base_url=base_url)
 
-    # Legacy: Anthropic env var
+    # Legacy: Anthropic
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
     if anthropic_key:
         model = os.environ.get("LLM_MODEL", "claude-haiku-4-5-20251001")
-        return LLMConfig(provider="anthropic", model=model, api_key=anthropic_key)
+        return LLMConfig(model=model, api_key=anthropic_key)
 
-    # Legacy: OpenAI env var
+    # Legacy: OpenAI
     openai_key = os.environ.get("OPENAI_API_KEY")
     if openai_key:
         model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
-        return LLMConfig(provider="openai", model=model, api_key=openai_key)
+        return LLMConfig(model=model, api_key=openai_key)
 
     return None
 
 
 def can_use_llm(vault_path: Path | None = None) -> bool:
-    """Return True if a valid LLM config exists and the required SDK is installed."""
-    cfg = load_llm_config(vault_path)
-    if cfg is None:
+    """Return True if a valid config exists and litellm is installed."""
+    if load_llm_config(vault_path) is None:
         return False
-    if cfg.provider == "anthropic":
-        try:
-            import anthropic  # noqa: F401
+    try:
+        import litellm  # noqa: F401
 
-            return True
-        except ImportError:
-            return False
-    else:
-        try:
-            import openai  # noqa: F401
-
-            return True
-        except ImportError:
-            return False
+        return True
+    except ImportError:
+        return False
 
 
 def extract_candidates_llm(
@@ -204,85 +184,29 @@ def extract_candidates_llm(
     cfg = load_llm_config(vault_path)
     if cfg is None:
         return []
-    if cfg.provider == "anthropic":
-        return _extract_anthropic(content, display_name, project, cfg)
-    else:
-        return _extract_openai_compat(content, display_name, project, cfg)
 
+    import litellm
 
-# ---------------------------------------------------------------------------
-# Shared prompt helpers
-# ---------------------------------------------------------------------------
-
-def _system_prompt() -> str:
-    return (
-        "You are a knowledge graph extraction assistant. "
-        "Extract ALL distinct entities (services, decisions, projects, issues, "
-        "people, processes, workstreams) from the provided content as separate "
-        "memory node candidates. Be comprehensive — if a document describes "
-        "multiple things, extract each as its own node."
-    )
-
-
-def _user_message(content: str, display_name: str, project: str | None) -> str:
     ctx = f" for project '{project}'" if project else ""
-    return (
-        f"Extract memory node candidates from the following document "
-        f"'{display_name}'{ctx}:\n\n{content}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Anthropic adapter (native tool_use)
-# ---------------------------------------------------------------------------
-
-def _extract_anthropic(
-    content: str,
-    display_name: str,
-    project: str | None,
-    cfg: LLMConfig,
-) -> list[dict[str, Any]]:
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=cfg.api_key)
-    tools = [
+    messages = [
         {
-            "name": "extract_memory_nodes",
-            "description": "Extract structured memory nodes from the provided content.",
-            "input_schema": _EXTRACTION_SCHEMA,
-        }
+            "role": "system",
+            "content": (
+                "You are a knowledge graph extraction assistant. "
+                "Extract ALL distinct entities (services, decisions, projects, issues, "
+                "people, processes, workstreams) from the provided content as separate "
+                "memory node candidates. Be comprehensive — if a document describes "
+                "multiple things, extract each as its own node."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Extract memory node candidates from the following document "
+                f"'{display_name}'{ctx}:\n\n{content}"
+            ),
+        },
     ]
-    response = client.messages.create(
-        model=cfg.model,
-        max_tokens=4096,
-        system=_system_prompt(),
-        tools=tools,
-        tool_choice={"type": "any"},
-        messages=[{"role": "user", "content": _user_message(content, display_name, project)}],
-    )
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "extract_memory_nodes":
-            return block.input.get("candidates", [])
-    return []
-
-
-# ---------------------------------------------------------------------------
-# OpenAI-compatible adapter (works with OpenAI, Gemini, Groq, Ollama, ...)
-# ---------------------------------------------------------------------------
-
-def _extract_openai_compat(
-    content: str,
-    display_name: str,
-    project: str | None,
-    cfg: LLMConfig,
-) -> list[dict[str, Any]]:
-    import openai as openai_sdk
-
-    kwargs: dict[str, Any] = {"api_key": cfg.api_key}
-    if cfg.base_url:
-        kwargs["base_url"] = cfg.base_url
-    client = openai_sdk.OpenAI(**kwargs)
-
     tools = [
         {
             "type": "function",
@@ -293,15 +217,19 @@ def _extract_openai_compat(
             },
         }
     ]
-    response = client.chat.completions.create(
-        model=cfg.model,
-        messages=[
-            {"role": "system", "content": _system_prompt()},
-            {"role": "user", "content": _user_message(content, display_name, project)},
-        ],
-        tools=tools,
-        tool_choice={"type": "function", "function": {"name": "extract_memory_nodes"}},
-    )
+
+    kwargs: dict[str, Any] = {
+        "model": cfg.model,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": {"type": "function", "function": {"name": "extract_memory_nodes"}},
+        "max_tokens": 4096,
+        "api_key": cfg.api_key,
+    }
+    if cfg.base_url:
+        kwargs["api_base"] = cfg.base_url
+
+    response = litellm.completion(**kwargs)
     tool_calls = response.choices[0].message.tool_calls
     if tool_calls:
         result = json.loads(tool_calls[0].function.arguments)

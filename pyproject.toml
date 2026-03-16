@@ -30,9 +30,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
 ]
-llm-anthropic = ["anthropic>=0.40.0"]
-llm-openai = ["openai>=1.0.0"]
-llm = ["anthropic>=0.40.0", "openai>=1.0.0"]
+llm = ["litellm>=1.0.0"]
 
 [project.scripts]
 linked-notes-mcp = "linked_notes_mcp.server:main"
