@@ -33,7 +33,7 @@ def _handle_ingest_sources(args: dict, graph: KnowledgeGraph) -> str:
         sources=args["sources"],
         project=args.get("project"),
         mode=args.get("mode", "stage"),
-        use_llm=args.get("use_llm", True),
+        use_llm=args.get("use_llm", False),
     )
     return json.dumps(result, indent=2)
 
@@ -246,8 +246,8 @@ TOOL_DEFS: list[Tool] = [
                 },
                 "use_llm": {
                     "type": "boolean",
-                    "default": True,
-                    "description": "Use LLM extraction when ANTHROPIC_API_KEY is set. Falls back to heuristic chunking.",
+                    "default": False,
+                    "description": "Opt in to LLM extraction for this ingestion run. By default, ingestion uses heuristic chunking even if LLM credentials are configured.",
                 },
                 "sources": {
                     "type": "array",

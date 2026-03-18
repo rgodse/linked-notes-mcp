@@ -1,5 +1,6 @@
 """Tests for server.py handlers and helpers."""
 
+import inspect
 import json
 import tempfile
 from pathlib import Path
@@ -1071,3 +1072,17 @@ class TestLLMExtraction:
         assert cfg is not None
         assert cfg.model == "claude-haiku-4-5-20251001"
         assert cfg.api_key == "ant-key"
+
+
+class TestIngestionDefaults:
+    def test_ingest_sources_python_api_defaults_llm_off(self):
+        from linked_notes_mcp.ingestion import ingest_sources
+
+        signature = inspect.signature(ingest_sources)
+        assert signature.parameters["use_llm"].default is False
+
+    def test_ingest_sources_tool_schema_defaults_llm_off(self):
+        from linked_notes_mcp.tools.ingestion_tools import TOOL_DEFS
+
+        tool = next(tool for tool in TOOL_DEFS if tool.name == "ingest_sources")
+        assert tool.inputSchema["properties"]["use_llm"]["default"] is False

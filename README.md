@@ -153,7 +153,9 @@ The body still matters, but treat it as supporting detail. Frontmatter carries t
 
 ## LLM-Assisted Ingestion
 
-`ingest_sources` can call an LLM to extract multiple structured memory node candidates from each document — including entities that a simple heuristic would miss. It falls back to heading-based chunking (H2/H3 sections) when no LLM is configured.
+`ingest_sources` can optionally call an LLM to extract multiple structured memory node candidates from each document — including entities that a simple heuristic would miss. By default, ingestion stays heuristic-first even if LLM credentials are configured. This keeps the normal Codex/Claude note workflow simple and deterministic.
+
+Pass `use_llm=true` only when you want a richer batch import or seed extraction pass.
 
 ### Configuration
 
@@ -200,8 +202,8 @@ OPENAI_API_KEY=...
 
 ### How extraction works
 
-1. If an LLM is configured, a single API call extracts all distinct entities from the document as separate candidates.
-2. If no LLM is configured, the document is split on H2/H3 headings (when ≥ 2 headings exist and the document is > 300 chars) — each section becomes one candidate.
+1. If `use_llm=true` and an LLM is configured, a single API call extracts all distinct entities from the document as separate candidates.
+2. Otherwise, the document is split on H2/H3 headings (when ≥ 2 headings exist and the document is > 300 chars) — each section becomes one candidate.
 3. Re-running `ingest_sources` on the same file or text is safe — already-seen content is detected by checksum and skipped.
 4. Accepted notes carry provenance frontmatter (`confidence`, `last_reviewed`, `source_refs`, `derived_from`).
 

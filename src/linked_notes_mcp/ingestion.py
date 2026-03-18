@@ -196,7 +196,7 @@ def ingest_sources(
     sources: list[dict[str, Any]],
     project: str | None = None,
     mode: str = "stage",
-    use_llm: bool = True,
+    use_llm: bool = False,
 ) -> dict[str, Any]:
     """Create an ingestion run and stage extracted candidates."""
 
