@@ -7,6 +7,20 @@ Graph-first local memory layer for AI agents built on MCP. Notes live on disk as
 
 Built for agent-authored memory: notes are optimized for retrieval, review, and long-term maintenance using structured frontmatter (`entity_type`, `summary`, `status`, `importance`, `confidence`, `last_reviewed`). Works for technical and non-technical work alike.
 
+## Who This Is For
+
+- teams using Codex, Claude, or other MCP clients repeatedly on the same projects
+- people who want durable project context outside chat history
+- workflows where humans may want to inspect or edit the memory directly in markdown
+- work that depends on relationships such as dependencies, blockers, decisions, owners, and followups
+
+## Who This Is Not For
+
+- passive memory of every conversation
+- a hosted wiki, ticket system, or general database
+- full conversational recall without curation
+- teams that do not want to maintain structured notes at all
+
 ## Why graph memory
 
 Plain search tells you which notes mention a word. Graph retrieval answers questions like:
@@ -17,6 +31,21 @@ Plain search tells you which notes mention a word. Graph retrieval answers quest
 - what context should I read next
 
 That matters because most real project questions are about relationships, not documents in isolation. Notes are nodes, wikilinks are edges, and frontmatter fields like `depends_on`, `blocks`, and `related_to` create typed edges you can traverse and filter.
+
+## Why This Over Plain Notes or Chat History
+
+- chat history is fragile and session-bound
+- plain markdown is readable but weak at dependencies, blockers, and decision tracing
+- vector-only memory is hard to inspect and hard to fix when it drifts
+- graph-shaped markdown keeps the source of truth local while making relationships explicit
+
+## Five-Minute Workflow
+
+1. Point `linked-notes-mcp` at a markdown folder.
+2. Connect to it from Codex or Claude.
+3. Create one project or repo note with `create_from_template(...)`.
+4. Add one service, issue, or decision note linked to that project.
+5. In the next session, use `start_session(...)` or `get_context(...)` to recover context instead of re-explaining it.
 
 ## Quick Start
 
@@ -67,6 +96,29 @@ Why these fields matter:
 - `importance`, `confidence`, `last_reviewed` drive health scoring and maintenance
 
 The body still matters, but treat it as supporting detail. Frontmatter carries the retrieval-critical facts.
+
+## Recommended Usage with Codex and Claude
+
+The main path is interactive note creation and maintenance during normal work.
+
+- use `create_from_template(...)` for new notes
+- use `upsert_memory_node(...)` and `update_relationships(...)` as the work evolves
+- use `save_decision(...)` and `end_session(...)` to preserve reasoning between sessions
+- use `ingest_sources(...)` mainly for seeding or importing existing material, not as the default interaction loop
+
+This is the intended workflow: the model writes and maintains structured notes while you work, and future sessions recover context from the graph.
+
+## Concrete Example
+
+One realistic loop:
+
+1. Create a repo note for `linked-notes-mcp`.
+2. Create a `service` note for the visualizer and mark it `part_of` the repo project.
+3. Create an `issue` note for a broken graph edge case and mark it `blocked_by` another service or dependency.
+4. Save a `decision` note explaining why LLM ingestion is opt-in by default.
+5. Start the next session with `start_session(topic="linked-notes-mcp", project="linked-notes-mcp")`.
+
+At that point the agent can recover the active project, nearby services, recent decisions, stale notes, and open followups from local markdown instead of from memory or chat history.
 
 ## Features
 
