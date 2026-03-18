@@ -12,6 +12,7 @@ from mcp.types import Tool
 from ..graph import KnowledgeGraph
 from ..ingestion import review_extracted_nodes
 from ..templates import (
+    build_template_frontmatter,
     create_decision_log,
     create_session_summary,
     render_template,
@@ -346,7 +347,18 @@ def _handle_create_from_template(args: dict, graph: KnowledgeGraph) -> str:
             title=args.get("title"),
             extra_tags=args.get("extra_tags"),
         )
-        note = graph.create_note(title=title, content=content, tags=tags)
+        extra_frontmatter, _ = build_template_frontmatter(
+            template_name=args["template"],
+            title=title,
+            fields=args.get("fields", {}),
+            extra_tags=args.get("extra_tags"),
+        )
+        note = graph.create_note(
+            title=title,
+            content=content,
+            tags=tags,
+            extra_frontmatter=extra_frontmatter,
+        )
         return json.dumps(
             {
                 "status": "success",

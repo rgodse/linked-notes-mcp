@@ -5,6 +5,7 @@ from datetime import datetime
 
 from linked_notes_mcp.templates import (
     TEMPLATES,
+    build_template_frontmatter,
     get_template,
     list_templates,
     render_template,
@@ -26,6 +27,12 @@ class TestTemplateBasics:
             assert "name" in t
             assert "description" in t
             assert "default_tags" in t
+            assert "entity_type" in t
+            assert "default_status" in t
+            assert "default_importance" in t
+            assert "default_confidence" in t
+            assert "body_fields" in t
+            assert "relationship_fields" in t
 
     def test_get_template_exists(self):
         template = get_template("session")
@@ -110,6 +117,42 @@ class TestRenderTemplate:
         assert title == "Ops Initiative"
         assert "Improve internal operations" in content
         assert "initiative" in tags
+
+    def test_render_service_template_adds_relationship_prompts(self):
+        title, content, tags = render_template(
+            template_name="service",
+            fields={"summary": "Handles billing workflows."},
+            title="Payments Service",
+        )
+
+        assert title == "Payments Service"
+        assert "Runbook / Ops Notes" in content
+        assert "_TBD_" in content
+        assert "service" in tags
+
+
+class TestTemplateFrontmatter:
+    def test_service_frontmatter_uses_template_specific_defaults(self):
+        frontmatter, tags = build_template_frontmatter(
+            template_name="service",
+            title="Payments Service",
+            fields={"summary": "Handles billing."},
+        )
+
+        assert frontmatter["entity_type"] == "service"
+        assert frontmatter["status"] == "active"
+        assert frontmatter["importance"] == "high"
+        assert frontmatter["confidence"] == 0.8
+        assert "service" in tags
+
+    def test_repo_project_frontmatter_derives_project_from_repository(self):
+        frontmatter, _ = build_template_frontmatter(
+            template_name="repo_project",
+            title="Project: linked-notes-mcp",
+            fields={"summary": "Graph memory MCP server.", "repository": "linked-notes-mcp"},
+        )
+
+        assert frontmatter["project"] == "linked-notes-mcp"
 
 
 class TestSessionSummary:

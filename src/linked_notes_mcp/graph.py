@@ -1049,6 +1049,7 @@ class KnowledgeGraph:
         content: str,
         tags: list[str] | None = None,
         filename: str | None = None,
+        extra_frontmatter: dict | None = None,
     ) -> Note:
         """Create a new note in the vault."""
 
@@ -1062,7 +1063,7 @@ class KnowledgeGraph:
         if filename in self.notes:
             raise ValueError(f"Note already exists: {filename}")
 
-        full_content = self._generate_frontmatter(title, tags_lower) + content
+        full_content = self._generate_frontmatter(title, tags_lower, extra_frontmatter) + content
         file_path = Path(self.vault_path) / f"{filename}.md"
         file_path.write_text(full_content, encoding="utf-8")
         return self._parse_add_and_index(file_path)

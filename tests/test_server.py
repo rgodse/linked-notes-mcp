@@ -912,6 +912,34 @@ class TestTemplateTools:
         assert "guidance" in result
         assert "Template-based note created" in result["guidance"]
 
+    @pytest.mark.asyncio
+    async def test_create_from_template_writes_structured_frontmatter(self, vault):
+        result = json.loads(
+            await handle_tool_call(
+                "create_from_template",
+                {
+                    "template": "service",
+                    "title": "Payments Service",
+                    "fields": {
+                        "summary": "Handles billing and subscriptions.",
+                        "project": "core-platform",
+                        "owners": ["Platform Team"],
+                        "depends_on": ["Auth Service", "Ledger Service"],
+                        "responsibilities": ["Charge cards", "Sync invoices"],
+                    },
+                },
+            )
+        )
+
+        assert result["status"] == "success"
+        note = srv.get_graph().get_note("payments-service")
+        assert note is not None
+        assert note.frontmatter["entity_type"] == "service"
+        assert note.frontmatter["summary"] == "Handles billing and subscriptions."
+        assert note.frontmatter["project"] == "core-platform"
+        assert note.frontmatter["status"] == "active"
+        assert note.frontmatter["depends_on"] == ["Auth Service", "Ledger Service"]
+
 
 # ---------------------------------------------------------------------------
 # followups: add → list → dismiss cycle

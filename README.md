@@ -220,28 +220,77 @@ OPENAI_API_KEY=...
 
 Use `create_from_template(template, fields)` with any of these:
 
-| Template | Use for |
-|----------|---------|
-| `repo_project` | Codebases and repositories |
-| `service` | Systems and components |
-| `issue` | Bugs and blockers |
-| `initiative` | Cross-team programs |
-| `workstream` | Ongoing processes |
-| `stakeholder` | People and teams |
-| `research` | Findings and supporting evidence |
-| `project` | General projects |
-| `decision` | Architectural and product choices |
-| `meeting` | Meeting notes and outcomes |
-| `session` | End-of-session summaries |
-| `idea` | Proposals and explorations |
-| `bug` | Bug reports |
-| `learning` | Learnings and reference notes |
+| Template | Use for | Emits frontmatter defaults |
+|----------|---------|---------------------------|
+| `repo_project` | Codebases and repositories | `entity_type=project`, `status=active`, `importance=high`, `confidence=0.8` |
+| `service` | Systems and components | `entity_type=service`, `status=active`, `importance=high`, `confidence=0.8` |
+| `issue` | Bugs and blockers | `entity_type=issue`, `status=open`, `importance=high`, `confidence=0.7` |
+| `initiative` | Cross-team programs | `entity_type=project`, `status=active`, `importance=high`, `confidence=0.75` |
+| `workstream` | Ongoing processes | `entity_type=workstream`, `status=active`, `importance=high`, `confidence=0.8` |
+| `stakeholder` | People and teams | `entity_type=person`, `status=active`, `importance=medium`, `confidence=0.75` |
+| `research` | Findings and supporting evidence | `entity_type=concept`, `status=active`, `importance=medium`, `confidence=0.6` |
+| `project` | General projects | `entity_type=project`, `status=active`, `importance=high`, `confidence=0.75` |
+| `decision` | Architectural and product choices | `entity_type=decision`, `status=decided`, `importance=high`, `confidence=0.9` |
+| `meeting` | Meeting notes and outcomes | `entity_type=process`, `status=done`, `importance=medium`, `confidence=0.8` |
+| `session` | End-of-session summaries | `entity_type=session`, `status=done`, `importance=medium`, `confidence=0.8` |
+| `idea` | Proposals and explorations | `entity_type=concept`, `status=draft`, `importance=low`, `confidence=0.4` |
+| `bug` | Bug reports | `entity_type=issue`, `status=open`, `importance=high`, `confidence=0.75` |
+| `learning` | Learnings and reference notes | `entity_type=concept`, `status=active`, `importance=low`, `confidence=0.7` |
 
 **Template-first workflow:**
 1. Call `list_templates()` to see available shapes
 2. Use `create_from_template(...)` for new notes whenever possible
-3. Refine with `upsert_memory_node(...)` for stronger machine-friendly frontmatter
-4. Use `promote_to_memory_node(...)` for messy raw output after the fact
+3. Pass relationship fields like `depends_on`, `blocked_by`, `part_of`, `decision_for`, or `related_to` at creation time when you know them
+4. Refine with `upsert_memory_node(...)` when summary, status, or project metadata changes materially
+5. Use `update_relationships(...)` when graph edges change after the note exists
+6. Use `promote_to_memory_node(...)` for messy raw output after the fact
+
+### Template Workflow Example
+
+For a new service note:
+
+```json
+{
+  "template": "service",
+  "title": "Payments Service",
+  "fields": {
+    "summary": "Handles billing and subscription lifecycle events.",
+    "project": "core-platform",
+    "responsibilities": ["Charge cards", "Sync invoices"],
+    "owners": ["Platform Team"],
+    "depends_on": ["Auth Service", "Ledger Service"],
+    "related_to": ["Billing Dashboard"],
+    "runbook": "Pager rotation lives in Ops handbook."
+  }
+}
+```
+
+This now creates a note with machine-friendly frontmatter such as:
+
+```yaml
+---
+entity_type: service
+summary: Handles billing and subscription lifecycle events.
+project: core-platform
+status: active
+importance: high
+confidence: 0.8
+depends_on:
+  - Auth Service
+  - Ledger Service
+related_to:
+  - Billing Dashboard
+---
+```
+
+### Good Template Inputs
+
+Prefer these fields when they apply:
+- `summary`: one or two sentences, retrieval-friendly, not prose sprawl
+- `project`: stable project or workstream grouping
+- relationship fields: actual note titles, not IDs or vague phrases
+- `owners`, `next_actions`, `risks`, `concerns`: bullet-list-friendly facts
+- `importance` and `confidence`: override defaults only when you have a reason
 
 ## Suggested Workflow
 
