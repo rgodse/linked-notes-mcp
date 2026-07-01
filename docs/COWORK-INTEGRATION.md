@@ -27,7 +27,7 @@ During work:
 
 At pause or completion:
 
-1. write `save_session_summary`
+1. write `end_session`
 2. link the summary note to the project or decision notes it affected
 
 ## Good Note Shapes
@@ -65,6 +65,6 @@ When working autonomously:
 1. Prefer graph tools over raw search when a note already exists.
 2. Maintain explicit frontmatter relationships for important dependencies and decisions.
 3. Use save_decision for meaningful choices.
-4. Use save_session_summary before stopping.
+4. Use end_session before stopping.
 5. Use add_followup for anything the next session should remember to check.
 ```

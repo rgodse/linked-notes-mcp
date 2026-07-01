@@ -125,7 +125,7 @@ Claude notes these observations. Future sessions start pre-calibrated to how you
 
 Claude uses **built-in templates** to create consistently structured notes. Here's what they look like:
 
-### Session Summary (created with `save_session_summary`)
+### Session Summary (created with `end_session`)
 ```
 ---
 title: Session - 2024-01-15 - API Planning

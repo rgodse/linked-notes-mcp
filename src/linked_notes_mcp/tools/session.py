@@ -1,16 +1,14 @@
-"""Session lifecycle, context, and template tools (14 tools)."""
+"""Session lifecycle, context, and template tools."""
 
 import json
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Callable
 
 import yaml
 from mcp.types import Tool
 
 from ..graph import KnowledgeGraph
-from ..ingestion import review_extracted_nodes
 from ..templates import (
     build_template_frontmatter,
     create_decision_log,
@@ -20,15 +18,10 @@ from ..templates import (
 from ..templates import list_templates as get_templates
 from .helpers import (
     _extract_excerpt,
-    _format_review_candidate,
     _load_followups,
-    _load_reviews,
-    _recommended_actions,
     _recent_session_notes,
-    _review_confidence,
     _save_followups,
     _session_next_steps,
-    _suggestion_key,
     _touched_note_summaries,
     format_note_brief,
 )
@@ -110,169 +103,6 @@ def _handle_start_session(args: dict, graph: KnowledgeGraph) -> str:
                     stale_notes=stale_notes[:5],
                     recent_sessions=recent_sessions,
                 ),
-            },
-        },
-        indent=2,
-    )
-
-
-def _handle_review_memory(args: dict, graph: KnowledgeGraph) -> str:
-    health_limit = args.get("health_limit", 10)
-    suggestion_limit = args.get("suggestion_limit", 10)
-    stale_limit = args.get("stale_limit", 10)
-    candidate_limit = args.get("candidate_limit", 10)
-    run_id = args.get("run_id")
-
-    stats = graph.get_stats()
-    health_items = graph.get_graph_health(health_limit)
-    stale_notes = graph.list_stale_notes()[:stale_limit]
-    reviews = _load_reviews(graph)
-    suggestions = graph.suggest_relationships(suggestion_limit)
-    pending_suggestions = []
-    for suggestion in suggestions:
-        key = _suggestion_key(
-            suggestion.source_id,
-            suggestion.target_id,
-            suggestion.suggested_type,
-        )
-        review = reviews.get(key, {"state": "pending"})
-        if review.get("state", "pending") != "pending":
-            continue
-        pending_suggestions.append(
-            {
-                "source_id": suggestion.source_id,
-                "target_id": suggestion.target_id,
-                "suggested_type": suggestion.suggested_type,
-                "score": suggestion.score,
-                "confidence": _review_confidence(review, suggestion.score),
-                "reasons": suggestion.reasons,
-            }
-        )
-
-    pending_candidates = review_extracted_nodes(
-        Path(graph.vault_path),
-        run_id=run_id,
-        state="pending",
-        recommendation=args.get("recommendation"),
-        limit=candidate_limit,
-    )
-    formatted_candidates = [
-        _format_review_candidate(candidate) for candidate in pending_candidates
-    ]
-    stale_payload = [
-        {
-            "id": note.id,
-            "title": note.title,
-            "expires": str(note.frontmatter.get("expires", "")),
-        }
-        for note in stale_notes
-    ]
-    weak_payload = [
-        {
-            "note_id": item.note_id,
-            "score": item.score,
-            "max_score": item.max_score,
-            "issues": item.issues,
-        }
-        for item in health_items
-    ]
-
-    return json.dumps(
-        {
-            "summary": {
-                "total_notes": stats.total_notes,
-                "total_links": stats.total_links,
-                "total_relationships": stats.total_relationships,
-                "orphan_notes": stats.orphan_notes,
-                "pending_relationship_suggestions": len(pending_suggestions),
-                "pending_ingestion_candidates": len(formatted_candidates),
-                "stale_notes": len(graph.list_stale_notes()),
-            },
-            "recommended_actions": _recommended_actions(
-                weak_notes=weak_payload,
-                pending_suggestions=pending_suggestions,
-                pending_candidates=formatted_candidates,
-                stale_notes=stale_payload,
-                limit=max(health_limit, suggestion_limit, stale_limit, candidate_limit),
-            ),
-            "weak_notes": weak_payload,
-            "pending_relationship_suggestions": pending_suggestions,
-            "pending_ingestion_candidates": formatted_candidates,
-            "stale_notes": stale_payload,
-        },
-        indent=2,
-    )
-
-
-def _handle_review_queue(args: dict, graph: KnowledgeGraph) -> str:
-    limit = args.get("limit", 8)
-    run_id = args.get("run_id")
-    recommendation = args.get("recommendation")
-    health_items = graph.get_graph_health(limit)
-    stale_notes = graph.list_stale_notes()[:limit]
-    reviews = _load_reviews(graph)
-    suggestions = graph.suggest_relationships(limit)
-    pending_suggestions = []
-    for suggestion in suggestions:
-        key = _suggestion_key(
-            suggestion.source_id,
-            suggestion.target_id,
-            suggestion.suggested_type,
-        )
-        review = reviews.get(key, {"state": "pending"})
-        if review.get("state", "pending") != "pending":
-            continue
-        pending_suggestions.append(
-            {
-                "source_id": suggestion.source_id,
-                "target_id": suggestion.target_id,
-                "suggested_type": suggestion.suggested_type,
-                "score": suggestion.score,
-                "confidence": _review_confidence(review, suggestion.score),
-                "reasons": suggestion.reasons,
-            }
-        )
-    pending_candidates = [
-        _format_review_candidate(candidate)
-        for candidate in review_extracted_nodes(
-            Path(graph.vault_path),
-            run_id=run_id,
-            state="pending",
-            recommendation=recommendation,
-            limit=limit,
-        )
-    ]
-    weak_notes = [
-        {
-            "note_id": item.note_id,
-            "score": item.score,
-            "max_score": item.max_score,
-            "issues": item.issues,
-        }
-        for item in health_items
-    ]
-    stale_payload = [
-        {
-            "id": note.id,
-            "title": note.title,
-            "expires": str(note.frontmatter.get("expires", "")),
-        }
-        for note in stale_notes
-    ]
-    return json.dumps(
-        {
-            "recommended_actions": _recommended_actions(
-                weak_notes=weak_notes,
-                pending_suggestions=pending_suggestions,
-                pending_candidates=pending_candidates,
-                stale_notes=stale_payload,
-                limit=limit,
-            ),
-            "counts": {
-                "weak_notes": len(weak_notes),
-                "pending_relationship_suggestions": len(pending_suggestions),
-                "pending_ingestion_candidates": len(pending_candidates),
-                "stale_notes": len(stale_payload),
             },
         },
         indent=2,
@@ -368,30 +198,6 @@ def _handle_create_from_template(args: dict, graph: KnowledgeGraph) -> str:
                     "Template-based note created. Prefer this flow for new notes "
                     "so memory stays consistent and graph-friendly."
                 ),
-            },
-            indent=2,
-        )
-    except ValueError as e:
-        return json.dumps({"error": str(e)})
-
-
-def _handle_save_session_summary(args: dict, graph: KnowledgeGraph) -> str:
-    try:
-        title, content, tags = create_session_summary(
-            summary=args["summary"],
-            accomplished=args["accomplished"],
-            decisions=args.get("decisions"),
-            open_items=args.get("open_items"),
-            next_session=args.get("next_session"),
-            project_tag=args.get("project"),
-            topic=args.get("topic"),
-        )
-        note = graph.create_note(title=title, content=content, tags=tags)
-        return json.dumps(
-            {
-                "status": "success",
-                "message": f"Saved session summary: {note.title}",
-                "note": format_note_brief(note),
             },
             indent=2,
         )
@@ -521,12 +327,9 @@ def _handle_dismiss_followup(args: dict, graph: KnowledgeGraph) -> str:
 
 HANDLERS: dict[str, Callable[[dict, KnowledgeGraph], str]] = {
     "start_session": _handle_start_session,
-    "review_memory": _handle_review_memory,
-    "review_queue": _handle_review_queue,
     "end_session": _handle_end_session,
     "list_templates": _handle_list_templates,
     "create_from_template": _handle_create_from_template,
-    "save_session_summary": _handle_save_session_summary,
     "save_decision": _handle_save_decision,
     "get_context": _handle_get_context,
     "get_note_summary": _handle_get_note_summary,
@@ -563,40 +366,6 @@ TOOL_DEFS: list[Tool] = [
                 },
             },
             "required": ["topic"],
-        },
-    ),
-    Tool(
-        name="review_memory",
-        description="Return one compact maintenance queue covering weak notes, stale notes, relationship suggestions, and pending ingestion candidates.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "health_limit": {"type": "integer", "default": 10},
-                "suggestion_limit": {"type": "integer", "default": 10},
-                "stale_limit": {"type": "integer", "default": 10},
-                "candidate_limit": {"type": "integer", "default": 10},
-                "run_id": {"type": "string", "description": "Optional ingestion run filter"},
-            },
-        },
-    ),
-    Tool(
-        name="review_queue",
-        description="Return a compact prioritized triage queue across weak notes, stale notes, relationship suggestions, and pending ingestion candidates.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "limit": {
-                    "type": "integer",
-                    "default": 8,
-                    "description": "Maximum actions to return",
-                },
-                "run_id": {"type": "string", "description": "Optional ingestion run filter"},
-                "recommendation": {
-                    "type": "string",
-                    "enum": ["create_new", "ambiguous", "merge_likely"],
-                    "description": "Optional candidate recommendation filter",
-                },
-            },
         },
     ),
     Tool(
@@ -667,44 +436,6 @@ TOOL_DEFS: list[Tool] = [
                 },
             },
             "required": ["template", "fields"],
-        },
-    ),
-    Tool(
-        name="save_session_summary",
-        description="Save a summary at the end of a work session. Captures what was accomplished, decisions made, and what's next. USE THIS before ending significant conversations.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "summary": {
-                    "type": "string",
-                    "description": "Brief 1-2 sentence summary of the session",
-                },
-                "accomplished": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of things accomplished this session",
-                },
-                "decisions": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Key decisions made (optional)",
-                },
-                "open_items": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Items still pending or blocked (optional)",
-                },
-                "next_session": {
-                    "type": "string",
-                    "description": "What to pick up next time (optional)",
-                },
-                "project": {"type": "string", "description": "Project name for tagging (optional)"},
-                "topic": {
-                    "type": "string",
-                    "description": "Topic/focus of this session for the title (optional)",
-                },
-            },
-            "required": ["summary", "accomplished"],
         },
     ),
     Tool(

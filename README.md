@@ -93,7 +93,6 @@ The main path is interactive note creation and maintenance during normal work.
 - use `create_from_template(...)` for new notes
 - use `upsert_memory_node(...)` and `update_relationships(...)` as the work evolves
 - use `save_decision(...)` and `end_session(...)` to preserve reasoning between sessions
-- use `ingest_sources(...)` mainly for seeding or importing existing material, not as the default interaction loop
 
 This is the intended workflow: the model writes and maintains structured notes while you work, and future sessions recover context from the graph.
 
@@ -104,7 +103,7 @@ One realistic loop:
 1. Create a repo note for `linked-notes-mcp`.
 2. Create a `service` note for the MCP server and mark it `part_of` the repo project.
 3. Create an `issue` note for a broken graph edge case and mark it `blocked_by` another service or dependency.
-4. Save a `decision` note explaining why LLM ingestion is opt-in by default.
+4. Save a `decision` note explaining a key architectural choice.
 5. Start the next session with `start_session(topic="linked-notes-mcp", project="linked-notes-mcp")`.
 
 At that point the agent can recover the active project, nearby services, recent decisions, stale notes, and open followups from local markdown instead of from memory or chat history.
@@ -117,7 +116,6 @@ At that point the agent can recover the active project, nearby services, recent 
 - typed graph relationships from frontmatter
 - graph traversal and path finding
 - graph-first context retrieval
-- staged seed ingestion for local files and inline text
 - write tools for persistent agent memory
 - Obsidian-compatible
 
@@ -158,7 +156,6 @@ At that point the agent can recover the active project, nearby services, recent 
 | `update_note(identifier, content?, title?, tags?)` | Replace note content or metadata |
 | `append_to_note(identifier, content)` | Add updates without replacing the whole note |
 | `delete_note(identifier)` | Delete a note from the vault |
-| `save_session_summary(...)` | Structured session memory |
 | `save_decision(...)` | Decision log with rationale |
 | `add_followup(topic, reminder)` | Persistent reminder across sessions |
 | `list_followups()` | List all pending followup reminders |
@@ -171,89 +168,13 @@ At that point the agent can recover the active project, nearby services, recent 
 | `lint_memory_graph()` | Find weak nodes missing structure or freshness metadata |
 | `suggest_relationships(limit?)` | Propose likely graph edges from shared structure |
 | `merge_memory_nodes(source, target)` | Merge duplicate or overlapping memory nodes |
-| `get_memory_health(identifier?)` | Score nodes by retrieval-readiness |
-| `review_relationship_suggestions(...)` | See pending/accepted/rejected suggestions |
-| `accept_relationship_suggestion(...)` | Apply a reviewed relationship suggestion |
-| `reject_relationship_suggestion(...)` | Record a rejected suggestion so it stops resurfacing |
-| `memory_dashboard(...)` | Compact view of weak notes, stale notes, and pending suggestions |
 | `promote_to_memory_node(...)` | Convert raw work output into a structured memory node |
 
-### Ingestion Tools
-
-| Tool | What it is good for |
-|------|----------------------|
-| `ingest_sources(...)` | Stage candidate memory nodes from local files, directories, glob patterns, or inline text |
-| `list_ingestion_runs(...)` | Review recent staged ingestion runs |
-| `review_extracted_nodes(...)` | Inspect candidates before promotion |
-| `accept_extracted_node(...)` | Promote a candidate into the graph (exact duplicates auto-merge; ambiguous matches surface a `merge_suggestion`) |
-| `reject_extracted_node(...)` | Reject a low-value candidate |
-| `merge_extracted_node(...)` | Merge a candidate into a specific existing note |
-| `accept_all_candidates(...)` | Bulk-accept pending candidates for a run |
-| `reject_all_candidates(...)` | Bulk-reject pending candidates for a run |
-
-## LLM-Assisted Ingestion
-
-`ingest_sources` can optionally call an LLM to extract multiple structured memory node candidates from each document — including entities that a simple heuristic would miss. By default, ingestion stays heuristic-first even if LLM credentials are configured. This keeps the normal Codex/Claude note workflow simple and deterministic.
-
-Pass `use_llm=true` only when you want a richer batch import or seed extraction pass.
-
-### Configuration
-
-Create `<vault>/.linked-notes-config.json` (add to `.gitignore`):
-
-```json
-{
-  "llm": {
-    "model":    "gpt-4o-mini",
-    "api_key":  "YOUR_KEY_HERE",
-    "base_url": null
-  }
-}
-```
-
-Set `model` using [litellm's model naming](https://docs.litellm.ai/docs/providers):
-
-| Provider | `model` value |
-|----------|--------------|
-| OpenAI | `gpt-4o-mini` |
-| Anthropic | `claude-haiku-4-5-20251001` |
-| Google Gemini | `gemini/gemini-1.5-flash` |
-| Groq | `groq/llama-3.1-8b-instant` |
-| Ollama (local) | `openai/llama3` + `"base_url": "http://localhost:11434/v1"` |
-
-Then install litellm:
-
-```bash
-uv add "linked-notes-mcp[llm]"
-```
-
-### Environment variable fallback
-
-If no config file is present, the server reads env vars:
-
-```bash
-# Generic
-LLM_API_KEY=...   LLM_MODEL=gpt-4o-mini   LLM_BASE_URL=https://...
-
-# Legacy — still supported
-ANTHROPIC_API_KEY=...
-OPENAI_API_KEY=...
-```
-
-### How extraction works
-
-1. If `use_llm=true` and an LLM is configured, a single API call extracts all distinct entities from the document as separate candidates.
-2. Otherwise, the document is split on H2/H3 headings (when ≥ 2 headings exist and the document is > 300 chars) — each section becomes one candidate.
-3. Re-running `ingest_sources` on the same file or text is safe — already-seen content is detected by checksum and skipped.
-4. Accepted notes carry provenance frontmatter (`confidence`, `last_reviewed`, `source_refs`, `derived_from`).
-
-### Workflow Tools
+### Session Tools
 
 | Tool | What it is good for |
 |------|----------------------|
 | `start_session(...)` | Build a compact working brief from search, graph context, followups, stale notes, and recent sessions |
-| `review_memory(...)` | Combined queue of weak notes, stale notes, relationship suggestions, and pending ingestion candidates |
-| `review_queue(...)` | Prioritized triage queue of highest-value memory actions |
 | `end_session(...)` | Save a session summary, update touched notes, create followups for open items |
 
 ## Templates
@@ -339,7 +260,6 @@ Prefer these fields when they apply:
 1. `get_context("project or topic")` to bootstrap context
 2. If one note is clearly central, call `get_graph_context` on it
 3. Check `list_relationships` before making changes
-4. Use `memory_dashboard()` for a compact view of what needs maintenance
 
 ### During work
 
@@ -355,7 +275,7 @@ Prefer these fields when they apply:
 ### Maintenance pass
 
 1. `lint_memory_graph()`
-2. `review_relationship_suggestions()` — accept or reject
+2. `suggest_relationships()` — review proposed edges
 3. `merge_memory_nodes(...)` for duplicates
 4. Refresh `last_reviewed`, `importance`, `confidence` on key notes
 
@@ -488,7 +408,6 @@ uv run python scripts/run_linked_notes_mcp.py /path/to/test/vault
 - [Guide](docs/GUIDE.md)
 - [Usage Rules](docs/USAGE-RULES.md)
 - [Autonomous Agent Integration](docs/COWORK-INTEGRATION.md)
-- [Seed Context Ingestion Spec](docs/INGESTION-SPEC.md)
 
 ## License
 

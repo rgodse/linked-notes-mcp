@@ -30,7 +30,6 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
 ]
-llm = ["litellm>=1.0.0"]
 
 [project.scripts]
 linked-notes-mcp = "linked_notes_mcp.server:main"

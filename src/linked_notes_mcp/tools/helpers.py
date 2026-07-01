@@ -3,13 +3,7 @@
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..common import (
-    candidate_recommendation_label,
-    infer_entity_type,
-    infer_summary,
-    load_json_file,
-    save_json_file,
-)
+from ..common import load_json_file, save_json_file
 from ..graph import KnowledgeGraph, Note
 
 if TYPE_CHECKING:
@@ -108,39 +102,6 @@ def _save_followups(graph: KnowledgeGraph, followups: list[dict]) -> None:
     save_json_file(_followups_path(graph), followups)
 
 
-def _reviews_path(graph: KnowledgeGraph) -> Path:
-    return Path(graph.vault_path) / ".linked_notes_reviews.json"
-
-
-def _load_reviews(graph: KnowledgeGraph) -> dict[str, dict]:
-    return load_json_file(_reviews_path(graph), {})
-
-
-def _save_reviews(graph: KnowledgeGraph, reviews: dict[str, dict]) -> None:
-    save_json_file(_reviews_path(graph), reviews, sort_keys=True)
-
-
-def _suggestion_key(source_id: str, target_id: str, suggested_type: str) -> str:
-    return f"{source_id}|{target_id}|{suggested_type}"
-
-
-def _review_confidence(review: dict, suggestion_score: int) -> float:
-    accepted = int(review.get("accepted_count", 0))
-    rejected = int(review.get("rejected_count", 0))
-    base = min(0.95, 0.25 + suggestion_score * 0.08)
-    adjustment = accepted * 0.07 - rejected * 0.08
-    confidence = max(0.0, min(0.99, base + adjustment))
-    return round(confidence, 2)
-
-
-def _infer_entity_type(raw_text: str, explicit_entity_type: str | None) -> str:
-    return infer_entity_type(raw_text, explicit_entity_type=explicit_entity_type)
-
-
-def _infer_summary(raw_text: str, explicit_summary: str | None) -> str:
-    return infer_summary(raw_text, explicit_summary=explicit_summary)
-
-
 def _recent_session_notes(
     graph: KnowledgeGraph,
     project: str | None,
@@ -177,113 +138,6 @@ def _touched_note_summaries(
             continue
         resolved.append(format_note_brief(note))
     return resolved
-
-
-def _candidate_recommendation(candidate: dict[str, Any]) -> str:
-    return candidate_recommendation_label(candidate)
-
-
-def _candidate_reason(candidate: dict[str, Any]) -> str:
-    dedupe = candidate.get("dedupe", {}) or {}
-    strategy = dedupe.get("strategy", "new")
-    reasons = dedupe.get("reasons", [])
-    matched = dedupe.get("matched_note_id")
-    if strategy == "duplicate" and matched:
-        return f"clear title-level match to existing note `{matched}`"
-    if strategy == "merge_into_existing" and matched:
-        suffix = f" ({'; '.join(reasons)})" if reasons else ""
-        return f"possible merge into `{matched}`{suffix}"
-    entity_type = candidate.get("entity_type", "memory node")
-    return f"new {entity_type} candidate from staged source"
-
-
-def _format_review_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-    evidence = candidate.get("evidence", []) or []
-    top_evidence = evidence[0] if evidence else {}
-    return {
-        "id": candidate.get("id"),
-        "title": candidate.get("title"),
-        "entity_type": candidate.get("entity_type"),
-        "summary": candidate.get("summary"),
-        "project": candidate.get("project"),
-        "review_state": candidate.get("review_state"),
-        "confidence": candidate.get("confidence"),
-        "recommendation": _candidate_recommendation(candidate),
-        "reason": _candidate_reason(candidate),
-        "matched_note_id": (candidate.get("dedupe", {}) or {}).get("matched_note_id"),
-        "relationships": candidate.get("relationships", []),
-        "evidence_preview": top_evidence.get("snippet"),
-        "source_ref": top_evidence.get("loc"),
-        "created_at": candidate.get("created_at"),
-    }
-
-
-def _recommended_actions(
-    weak_notes: list[dict[str, Any]],
-    pending_suggestions: list[dict[str, Any]],
-    pending_candidates: list[dict[str, Any]],
-    stale_notes: list[dict[str, Any]],
-    limit: int = 10,
-) -> list[dict[str, Any]]:
-    actions: list[dict[str, Any]] = []
-
-    for candidate in pending_candidates:
-        recommendation = candidate.get("recommendation")
-        score = (
-            100 if recommendation == "merge_likely" else 85 if recommendation == "ambiguous" else 75
-        )
-        actions.append(
-            {
-                "kind": "ingestion_candidate",
-                "priority": score,
-                "title": candidate.get("title"),
-                "action": recommendation,
-                "reason": candidate.get("reason"),
-                "candidate_id": candidate.get("id"),
-            }
-        )
-
-    for note in weak_notes:
-        score = max(0, 70 - int(note.get("score", 0)) * 5)
-        actions.append(
-            {
-                "kind": "weak_note",
-                "priority": score,
-                "title": note.get("note_id"),
-                "action": "improve_note",
-                "reason": ", ".join(note.get("issues", [])[:2]),
-                "note_id": note.get("note_id"),
-            }
-        )
-
-    for suggestion in pending_suggestions:
-        actions.append(
-            {
-                "kind": "relationship_suggestion",
-                "priority": 65 + int(suggestion.get("score", 0)),
-                "title": f"{suggestion.get('source_id')} -> {suggestion.get('target_id')}",
-                "action": "review_relationship",
-                "reason": "; ".join(suggestion.get("reasons", [])[:2]),
-                "source_id": suggestion.get("source_id"),
-                "target_id": suggestion.get("target_id"),
-                "suggested_type": suggestion.get("suggested_type"),
-            }
-        )
-
-    for note in stale_notes:
-        actions.append(
-            {
-                "kind": "stale_note",
-                "priority": 60,
-                "title": note.get("title"),
-                "action": "refresh_note",
-                "reason": f"expired on {note.get('expires', '')}",
-                "note_id": note.get("id"),
-            }
-        )
-
-    actions.sort(key=lambda item: (-item["priority"], item["kind"], item["title"]))
-    return actions[:limit]
 
 
 def _session_next_steps(

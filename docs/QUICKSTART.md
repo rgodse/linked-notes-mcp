@@ -98,7 +98,7 @@ Use these habits consistently:
 1. Start with `get_context` or `get_graph_context`
 2. Save decisions when you make them
 3. Add followups for unresolved work
-4. End with `save_session_summary`
+4. End with `end_session`
 
 ## Troubleshooting
 
