@@ -9,7 +9,7 @@ import yaml
 from mcp.types import Tool
 
 from ..graph import KnowledgeGraph
-from ..rank import importance_weight, salience_rerank
+from ..rank import salience_rerank, salience_scores
 from ..templates import (
     build_template_frontmatter,
     create_decision_log,
@@ -238,12 +238,8 @@ def _handle_get_context(args: dict, graph: KnowledgeGraph) -> str:
 
     raw_notes = graph.search(query, limit)
 
-    # Compute salience scores using original search ranks, then rerank.
-    w = (0.6, 0.4)
-    salience_scores = {
-        note.id: w[0] * (1.0 / (rank + 1)) + w[1] * importance_weight(note.frontmatter)
-        for rank, note in enumerate(raw_notes)
-    }
+    # Salience scores (single source of truth in rank.py) drive both ordering and display.
+    scores = salience_scores(raw_notes)
     notes = salience_rerank(raw_notes)
 
     followups = _load_followups(graph)
@@ -258,7 +254,7 @@ def _handle_get_context(args: dict, graph: KnowledgeGraph) -> str:
     for note in notes:
         brief = format_note_brief(note)
         brief["excerpt"] = _extract_excerpt(note, query)
-        brief["relevance"] = round(salience_scores[note.id], 3)
+        brief["relevance"] = round(scores[note.id], 3)
         context_notes.append(brief)
 
     graph_context = None

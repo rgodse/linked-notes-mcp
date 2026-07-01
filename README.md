@@ -387,16 +387,18 @@ shipped in the server.
 |---|---|---|---|
 | text (tokenized) | **0.81** | 0.71–0.90 | 0.82 |
 | + salience (importance-weighted) | 0.81 | 0.71–0.90 | 0.82 |
-| + hybrid (FastEmbed vectors) | 0.82 | 0.72–0.91 | 0.84 |
+| + hybrid (FastEmbed vectors) | 0.82 | 0.72–0.91 | 0.82 |
 
-**The honest finding.** Salience and hybrid embeddings show **no significant lift**
-on this vault — the CIs overlap; well-tokenized lexical search is already enough.
-The likely cause is a stated limitation, not a triumph: the queries were written by
+**The honest finding — two "no lift" results, for different reasons.** *Salience is
+inert by construction here:* the synthetic vault carries no `importance` metadata, so
+salience reproduces search order exactly (text and salience are byte-identical) — it
+wasn't really tested, and this says nothing about its value. *Hybrid embeddings were
+tested and showed no lift* (+0.01, noise) — likely because the queries were written by
 the same model as the notes, so they share vocabulary and lexical search saturates,
 leaving embeddings nothing to recover. On real vaults with a genuine paraphrase gap,
 hybrid should help — but *this* benchmark can't prove it, so it doesn't claim it.
 Hybrid ships as an optional `[embeddings]` extra (local FastEmbed, no API); the
-server falls back to text-only without it.
+server falls back to text-only without it. Full detail + limitations in [`results.md`](results.md).
 
 Reproduce: `uv sync --extra embeddings && uv run python -m optimize.run`.
 

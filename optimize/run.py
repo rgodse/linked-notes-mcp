@@ -16,7 +16,7 @@ def evaluate(graph, dataset: list[dict], mode: str, k: int = 5, index=None) -> d
     for row in dataset:
         ids = retrieve(graph, row["query"], mode, k=k, index=index)
         recalls.append(recall_at_k(ids, row["gold_note_ids"], k))
-        rrs.append(mrr(ids, row["gold_note_ids"]))
+        rrs.append(mrr(ids[:k], row["gold_note_ids"]))  # cap MRR at k so rungs are comparable
     n = len(dataset)
     return {"recall@5": sum(recalls) / n, "mrr": sum(rrs) / n, "recall_ci": bootstrap_ci(recalls, seed=0)}
 

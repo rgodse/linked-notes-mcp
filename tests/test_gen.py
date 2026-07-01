@@ -1,8 +1,24 @@
 import json, pathlib
+import pytest
 from evals import gen
+from evals.gen import _loads
 from evals.config import EvalConfig
 
 CFG = EvalConfig("k", "b", "gen/x", "judge/y", "s/z")
+
+
+def test_loads_clean_fenced_and_prose():
+    assert _loads('{"a": 1}') == {"a": 1}
+    assert _loads('```json\n{"a": 1}\n```') == {"a": 1}
+    assert _loads('```\n{"a": 1}\n```') == {"a": 1}
+    assert _loads('Here you go:\n{"a": 1}\nDone.') == {"a": 1}
+    # a stray brace in prose BEFORE a fenced block must not corrupt the parse
+    assert _loads('Use {curly} then:\n```json\n{"a": 1}\n```') == {"a": 1}
+
+
+def test_loads_raises_on_nonjson():
+    with pytest.raises(json.JSONDecodeError):
+        _loads("no json here at all")
 
 def _fake_chat_factory():
     # first call returns notes JSON, second returns queries JSON

@@ -1,6 +1,7 @@
 """Synthesize a reproducible software-domain vault + query->gold dataset."""
 from __future__ import annotations
 import json
+import re
 from pathlib import Path
 import yaml
 from evals import llm
@@ -21,18 +22,21 @@ QUERIES_PROMPT = (
 
 
 def _loads(text: str) -> dict:
-    """Parse JSON that may be wrapped in ```json fences or surrounded by prose."""
+    """Parse JSON that may be wrapped in ```json fences or surrounded by prose.
+
+    Prefers a fenced code block anywhere in the text (so prose containing a stray
+    '{' before the fence cannot corrupt the parse), then falls back to slicing the
+    outermost {...}.
+    """
     t = text.strip()
-    if t.startswith("```"):
-        t = t.split("```", 2)[1]
-        if t.lstrip().startswith("json"):
-            t = t.lstrip()[4:]
-        t = t.strip()
+    fenced = re.search(r"```(?:json)?\s*(.+?)```", t, re.DOTALL)
+    if fenced:
+        t = fenced.group(1).strip()
     try:
         return json.loads(t)
     except json.JSONDecodeError:
         start, end = t.find("{"), t.rfind("}")
-        if start != -1 and end != -1:
+        if start != -1 and end > start:
             return json.loads(t[start:end + 1])
         raise
 

@@ -4,7 +4,7 @@ from optimize.salience import rerank
 
 
 def _text_candidates(graph, query, k):
-    """Return [(id, relevance, frontmatter)] from search + one-hop expansion."""
+    """Return [(id, relevance, frontmatter)] from lexical search (top-k). No graph expansion."""
     hits = graph.search(query, limit=k)
     cands, seen = [], set()
     for rank, note in enumerate(hits):

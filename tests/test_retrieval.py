@@ -17,8 +17,11 @@ def test_text_mode_finds_lexical_match(tmp_path):
 def test_hybrid_finds_semantic_via_index(tmp_path):
     g = _vault(tmp_path)
     def fake_embed(texts):
+        # "auth" substring drives the first dimension; "authorization" maps to the auth vector
         return [[float("token" in t.lower() or "auth" in t.lower()), float("rout" in t.lower())] for t in texts]
     idx = EmbeddingIndex(embed_fn=fake_embed)
     idx.build({"auth": "authentication tokens jwt", "gw": "request routing"})
-    ids = retrieve(g, "credential", "hybrid", k=5, index=idx)
-    assert isinstance(ids, list)
+    # "authorization" is not a lexical substring of any note; the embedding index
+    # maps it to the auth vector, so hybrid returns the auth note.
+    ids = retrieve(g, "authorization", "hybrid", k=5, index=idx)
+    assert "auth" in ids
