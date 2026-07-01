@@ -3,8 +3,10 @@ import ast, pathlib
 SRC = pathlib.Path("src/linked_notes_mcp")
 
 def test_server_never_imports_eval_or_optimize():
+    py_files = list(SRC.rglob("*.py"))
+    assert py_files, f"no source files found under {SRC} (wrong cwd?)"
     offenders = []
-    for py in SRC.rglob("*.py"):
+    for py in py_files:
         tree = ast.parse(py.read_text())
         for node in ast.walk(tree):
             mods = []
@@ -20,5 +22,4 @@ def test_eval_optional_dep_group_present():
     import tomllib
     data = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
     eval_deps = data["project"]["optional-dependencies"]["eval"]
-    assert any(d.startswith("litellm") for d in eval_deps)
-    assert any(d.startswith("dspy-ai") for d in eval_deps)
+    assert eval_deps == ["litellm>=1.0.0", "dspy-ai>=2.5"]
