@@ -368,6 +368,38 @@ command = "uv"
 args = ["run", "--directory", "/absolute/path/to/linked-notes-mcp", "python", "scripts/run_linked_notes_mcp.py", "/path/to/your/notes"]
 ```
 
+## Retrieval: measured, not guessed
+
+Most memory tools claim their retrieval is good; the field's public benchmarks
+contradict each other and don't reproduce. This repo ships a **local, reproducible
+retrieval benchmark** instead — recall@5 / MRR with bootstrap 95% CIs, over a
+committed synthetic vault (60 notes + 40 query→gold pairs). Full write-up:
+[`results.md`](results.md); harness in [`evals/`](evals) + [`optimize/`](optimize).
+
+**What it caught.** The first run scored `text: recall@5 = 0.00`. Not a weak
+baseline — a *broken* one: `search` matched the whole query as a substring, so
+`get_context` returned **nothing** for natural-language questions (single keywords
+worked; questions didn't). Tokenizing search fixed it — **recall@5 0.00 → 0.81**.
+That bug fix, surfaced by the benchmark, was the biggest retrieval win here, and it
+shipped in the server.
+
+| Rung | recall@5 | 95% CI | MRR |
+|---|---|---|---|
+| text (tokenized) | **0.81** | 0.71–0.90 | 0.82 |
+| + salience (importance-weighted) | 0.81 | 0.71–0.90 | 0.82 |
+| + hybrid (FastEmbed vectors) | 0.82 | 0.72–0.91 | 0.84 |
+
+**The honest finding.** Salience and hybrid embeddings show **no significant lift**
+on this vault — the CIs overlap; well-tokenized lexical search is already enough.
+The likely cause is a stated limitation, not a triumph: the queries were written by
+the same model as the notes, so they share vocabulary and lexical search saturates,
+leaving embeddings nothing to recover. On real vaults with a genuine paraphrase gap,
+hybrid should help — but *this* benchmark can't prove it, so it doesn't claim it.
+Hybrid ships as an optional `[embeddings]` extra (local FastEmbed, no API); the
+server falls back to text-only without it.
+
+Reproduce: `uv sync --extra embeddings && uv run python -m optimize.run`.
+
 ## Known Limitations and Roadmap
 
 Current limits:
