@@ -31,6 +31,7 @@ dev = [
     "ruff>=0.4",
 ]
 eval = ["litellm>=1.0.0", "dspy-ai>=2.5"]
+embeddings = ["fastembed>=0.3"]
 
 [project.scripts]
 linked-notes-mcp = "linked_notes_mcp.server:main"
