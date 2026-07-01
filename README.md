@@ -55,17 +55,6 @@ That matters because most real project questions are about relationships, not do
 uvx --from git+https://github.com/rgodse/linked-notes-mcp linked-notes-mcp /path/to/your/notes
 ```
 
-### Run the local visualizer
-
-```bash
-git clone https://github.com/rgodse/linked-notes-mcp
-cd linked-notes-mcp
-uv sync
-uv run python scripts/run_linked_notes_ui.py /path/to/your/notes
-```
-
-Then open `http://127.0.0.1:8765` in your browser.
-
 ## Agent-First Note Shape
 
 Prefer notes with machine-friendly frontmatter:
@@ -113,7 +102,7 @@ This is the intended workflow: the model writes and maintains structured notes w
 One realistic loop:
 
 1. Create a repo note for `linked-notes-mcp`.
-2. Create a `service` note for the visualizer and mark it `part_of` the repo project.
+2. Create a `service` note for the MCP server and mark it `part_of` the repo project.
 3. Create an `issue` note for a broken graph edge case and mark it `blocked_by` another service or dependency.
 4. Save a `decision` note explaining why LLM ingestion is opt-in by default.
 5. Start the next session with `start_session(topic="linked-notes-mcp", project="linked-notes-mcp")`.
@@ -130,7 +119,6 @@ At that point the agent can recover the active project, nearby services, recent 
 - graph-first context retrieval
 - staged seed ingestion for local files and inline text
 - write tools for persistent agent memory
-- local browser visualizer
 - Obsidian-compatible
 
 ## Tools
@@ -460,39 +448,12 @@ command = "uv"
 args = ["run", "--directory", "/absolute/path/to/linked-notes-mcp", "python", "scripts/run_linked_notes_mcp.py", "/path/to/your/notes"]
 ```
 
-## Local Visualizer
-
-React Flow-based graph UI over the same local markdown vault. No hosted backend, no CDN, no cloud dependency.
-
-```bash
-uv run python scripts/run_linked_notes_ui.py /path/to/your/notes
-```
-
-Then open `http://127.0.0.1:8765`.
-
-Supports:
-- `Overview`, `Subsystem`, and `Flow` graph lenses
-- focus-area and detail-level controls
-- node detail with `Note` and `Source` modes
-- local source previews from repo evidence with line-aware file previews
-- persistent local UI state
-
-To rebuild the UI after editing:
-
-```bash
-npm install
-npm run build:ui
-```
-
-Built assets are served from `src/linked_notes_mcp/static/`.
-
 ## Known Limitations and Roadmap
 
 Current limits:
 - works best when notes use structured frontmatter consistently
 - optimized for durable explicit memory, not full conversational recall
 - graph quality depends on review and maintenance over time
-- local UI is functional but still an early workbench
 
 Planned directions:
 - `repo-context-mcp` — durable repository and codebase memory as a companion producer
@@ -528,8 +489,6 @@ uv run python scripts/run_linked_notes_mcp.py /path/to/test/vault
 - [Usage Rules](docs/USAGE-RULES.md)
 - [Autonomous Agent Integration](docs/COWORK-INTEGRATION.md)
 - [Seed Context Ingestion Spec](docs/INGESTION-SPEC.md)
-- [UX Roadmap](docs/UX-ROADMAP.md)
-- [Visualizer Spec](docs/VISUALIZER-SPEC.md)
 
 ## License
 
