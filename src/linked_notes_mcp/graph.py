@@ -9,6 +9,7 @@ Uses NetworkX for graph operations. Supports:
 - Graph-first context retrieval
 """
 
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
@@ -80,6 +81,14 @@ class TraversalResult:
     depth: int
     nodes: list[str]
     edges: list[tuple[str, str]]
+
+
+_STOPWORDS = {
+    "the", "a", "an", "is", "are", "was", "were", "of", "for", "to", "in",
+    "on", "and", "or", "what", "which", "how", "does", "do", "did", "used",
+    "across", "that", "this", "with", "by", "from", "at", "as", "it", "its",
+    "be", "been",
+}
 
 
 class KnowledgeGraph:
@@ -443,43 +452,78 @@ class KnowledgeGraph:
             detailed_path.append(step)
         return detailed_path
 
-    def search(self, query: str, limit: int = 20) -> list[Note]:
-        """Full-text search across all notes."""
+    def _match_score(self, note: Note, needle: str) -> int:
+        """Return a relevance score for a single lowercased search term against a note.
 
-        query_lower = query.lower()
-        results = []
-
-        for note in self.notes.values():
-            score = 0
-            if query_lower in note.title.lower():
-                score += 10
-            for alias in note.aliases:
-                alias_lower = alias.lower()
-                if query_lower == alias_lower:
-                    score += 9
-                elif query_lower in alias_lower:
-                    score += 6
-            for tag in note.tags:
-                if query_lower in tag:
-                    score += 5
-            summary = str(note.frontmatter.get("summary", "")).lower()
-            if query_lower in summary:
+        Scoring weights (same as the original substring search):
+          title        +10
+          alias exact  +9 / alias contains +6
+          tag          +5
+          summary      +6
+          project      +5
+          entity_type  +4
+          status       +3
+          relation_type +4
+          content      +1
+        """
+        score = 0
+        if needle in note.title.lower():
+            score += 10
+        for alias in note.aliases:
+            alias_lower = alias.lower()
+            if needle == alias_lower:
+                score += 9
+            elif needle in alias_lower:
                 score += 6
-            project = str(note.frontmatter.get("project", "")).lower()
-            if query_lower in project:
+        for tag in note.tags:
+            if needle in tag:
                 score += 5
-            note_type = str(note.frontmatter.get("entity_type", "")).lower()
-            if query_lower in note_type:
+        summary = str(note.frontmatter.get("summary", "")).lower()
+        if needle in summary:
+            score += 6
+        project = str(note.frontmatter.get("project", "")).lower()
+        if needle in project:
+            score += 5
+        note_type = str(note.frontmatter.get("entity_type", "")).lower()
+        if needle in note_type:
+            score += 4
+        status = str(note.frontmatter.get("status", "")).lower()
+        if needle in status:
+            score += 3
+        for relationship in note.explicit_relationships:
+            if needle in relationship.relation_type:
                 score += 4
-            status = str(note.frontmatter.get("status", "")).lower()
-            if query_lower in status:
-                score += 3
-            score += self._note_priority(note)
-            for relationship in note.explicit_relationships:
-                if query_lower in relationship.relation_type:
-                    score += 4
-            if query_lower in note.content.lower():
-                score += 1
+        if needle in note.content.lower():
+            score += 1
+        return score
+
+    def search(self, query: str, limit: int = 20) -> list[Note]:
+        """Full-text search across all notes.
+
+        The query is tokenised into individual terms (stop-words and short
+        tokens removed) so that natural-language questions like
+        "What authentication method is used for stateless tokens?" match notes
+        that contain the relevant keywords.  Single-keyword queries behave
+        exactly as before.  When multiple terms are extracted the whole phrase
+        is also tried as a bonus so exact phrase matches still rank highest.
+        """
+        ql = query.lower()
+        terms = [
+            t
+            for t in re.split(r"[^a-z0-9]+", ql)
+            if len(t) >= 3 and t not in _STOPWORDS
+        ]
+        if not terms:
+            terms = [ql.strip()] if ql.strip() else []
+
+        results = []
+        for note in self.notes.values():
+            score = self._note_priority(note)
+            for t in terms:
+                score += self._match_score(note, t)
+            if len(terms) > 1:
+                # Whole-phrase bonus: exact matches still rank highest
+                score += self._match_score(note, ql)
             if score > 0:
                 results.append((score, note))
 

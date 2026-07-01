@@ -195,6 +195,34 @@ class TestKnowledgeGraph:
         graph.rebuild()
         assert len(graph.notes) == initial_count + 1
 
+    def test_search_natural_language_question(self, tmp_path):
+        """Natural-language questions should match notes that contain the query terms.
+
+        Regression: the old substring-only match scored 0 for questions like
+        'What authentication method is used for stateless tokens?' even when a
+        note's title, summary, and content all contained 'authentication' and
+        'tokens'.  The fix tokenises the query so each term is matched
+        independently.
+        """
+        (tmp_path / "jwt-auth.md").write_text(
+            "---\n"
+            "title: JWT Authentication\n"
+            "summary: How stateless tokens work for authentication\n"
+            "tags: [authentication, jwt]\n"
+            "---\n"
+            "JSON Web Tokens (JWT) enable stateless authentication by encoding claims "
+            "into a signed token that the server can verify without a session store.\n"
+        )
+        graph = KnowledgeGraph(tmp_path)
+        results = graph.search(
+            "What authentication method is used for stateless tokens?"
+        )
+        assert results, (
+            "Expected at least one result for a natural-language question whose "
+            "terms appear in the note, but got []"
+        )
+        assert results[0].id == "jwt-auth"
+
 
 class TestWriteOperations:
     """Tests for write operations (create, update, append, delete)."""
