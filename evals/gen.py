@@ -20,6 +20,23 @@ QUERIES_PROMPT = (
 )
 
 
+def _loads(text: str) -> dict:
+    """Parse JSON that may be wrapped in ```json fences or surrounded by prose."""
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.split("```", 2)[1]
+        if t.lstrip().startswith("json"):
+            t = t.lstrip()[4:]
+        t = t.strip()
+    try:
+        return json.loads(t)
+    except json.JSONDecodeError:
+        start, end = t.find("{"), t.rfind("}")
+        if start != -1 and end != -1:
+            return json.loads(t[start:end + 1])
+        raise
+
+
 def _write_note(vault: Path, note: dict) -> None:
     fm = yaml.safe_dump(note["frontmatter"], sort_keys=False).strip()
     (vault / f"{note['id']}.md").write_text(f"---\n{fm}\n---\n\n{note['body']}\n")
@@ -36,14 +53,14 @@ def generate(out_dir: str, cfg: EvalConfig | None = None,
     vault = out / "vault"
     vault.mkdir(parents=True, exist_ok=True)
 
-    notes = json.loads(chat_fn(cfg.gen_model, [{"role": "user", "content": NOTES_PROMPT}], cfg))["notes"]
+    notes = _loads(chat_fn(cfg.gen_model, [{"role": "user", "content": NOTES_PROMPT}], cfg))["notes"]
     for note in notes:
         _write_note(vault, note)
 
     catalog = "\n".join(f'{n["id"]}: {n["frontmatter"].get("title","")} — '
                         f'{n["frontmatter"].get("summary","")}' for n in notes)
-    raw_q = json.loads(chat_fn(cfg.gen_model,
-                               [{"role": "user", "content": QUERIES_PROMPT + catalog}], cfg))["queries"]
+    raw_q = _loads(chat_fn(cfg.gen_model,
+                           [{"role": "user", "content": QUERIES_PROMPT + catalog}], cfg))["queries"]
     queries = [{"id": f"q{i:03d}", **q} for i, q in enumerate(raw_q)]
     queries_path.write_text(json.dumps(queries, indent=2))
     (out / "meta.json").write_text(json.dumps(

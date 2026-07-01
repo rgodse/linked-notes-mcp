@@ -1,0 +1,318 @@
+[
+  {
+    "id": "q000",
+    "query": "What authentication method is used for stateless authentication across services?",
+    "gold_note_ids": [
+      "jwt-token-strategy",
+      "stateless-auth-concept"
+    ]
+  },
+  {
+    "id": "q001",
+    "query": "How are passwords securely stored in the authentication system?",
+    "gold_note_ids": [
+      "password-hashing-decision"
+    ]
+  },
+  {
+    "id": "q002",
+    "query": "Which external authentication providers are supported?",
+    "gold_note_ids": [
+      "oauth2-integration"
+    ]
+  },
+  {
+    "id": "q003",
+    "query": "What is the central entry point for all API requests?",
+    "gold_note_ids": [
+      "api-gateway"
+    ]
+  },
+  {
+    "id": "q004",
+    "query": "How is rate limiting implemented in the system?",
+    "gold_note_ids": [
+      "rate-limiting-decision"
+    ]
+  },
+  {
+    "id": "q005",
+    "query": "What validation strategy is used for API requests?",
+    "gold_note_ids": [
+      "request-validation-strategy"
+    ]
+  },
+  {
+    "id": "q006",
+    "query": "How are logs collected and analyzed across services?",
+    "gold_note_ids": [
+      "logging-infrastructure",
+      "log-aggregation-decision"
+    ]
+  },
+  {
+    "id": "q007",
+    "query": "Which payment processor is used for transaction handling?",
+    "gold_note_ids": [
+      "stripe-integration",
+      "payment-service"
+    ]
+  },
+  {
+    "id": "q008",
+    "query": "How are failed payment attempts handled?",
+    "gold_note_ids": [
+      "payment-retry-decision"
+    ]
+  },
+  {
+    "id": "q009",
+    "query": "What notification channels are supported by the platform?",
+    "gold_note_ids": [
+      "notification-service"
+    ]
+  },
+  {
+    "id": "q010",
+    "query": "Which template engine is used for rendering notifications?",
+    "gold_note_ids": [
+      "template-engine-decision"
+    ]
+  },
+  {
+    "id": "q011",
+    "query": "How do services communicate asynchronously?",
+    "gold_note_ids": [
+      "event-driven-architecture",
+      "message-broker-decision"
+    ]
+  },
+  {
+    "id": "q012",
+    "query": "What message broker is used for event distribution?",
+    "gold_note_ids": [
+      "message-broker-decision"
+    ]
+  },
+  {
+    "id": "q013",
+    "query": "Which database is used for the primary data store?",
+    "gold_note_ids": [
+      "database-schema-decision"
+    ]
+  },
+  {
+    "id": "q014",
+    "query": "What caching technologies are implemented in the system?",
+    "gold_note_ids": [
+      "cache-layer-decision",
+      "redis-infrastructure"
+    ]
+  },
+  {
+    "id": "q015",
+    "query": "How is product search implemented?",
+    "gold_note_ids": [
+      "search-service",
+      "elasticsearch-infrastructure"
+    ]
+  },
+  {
+    "id": "q016",
+    "query": "How is search index consistency maintained?",
+    "gold_note_ids": [
+      "search-indexing-decision"
+    ]
+  },
+  {
+    "id": "q017",
+    "query": "What machine learning technique is used for product recommendations?",
+    "gold_note_ids": [
+      "recommendation-engine"
+    ]
+  },
+  {
+    "id": "q018",
+    "query": "How is user interaction data tracked?",
+    "gold_note_ids": [
+      "user-behavior-tracking"
+    ]
+  },
+  {
+    "id": "q019",
+    "query": "What privacy regulations does the platform comply with?",
+    "gold_note_ids": [
+      "privacy-policy-decision"
+    ]
+  },
+  {
+    "id": "q020",
+    "query": "Where is analytics and ML data stored?",
+    "gold_note_ids": [
+      "data-warehouse-decision"
+    ]
+  },
+  {
+    "id": "q021",
+    "query": "How is inventory synchronized between services?",
+    "gold_note_ids": [
+      "inventory-sync-decision"
+    ]
+  },
+  {
+    "id": "q022",
+    "query": "What container orchestration platform is being migrated to?",
+    "gold_note_ids": [
+      "kubernetes-migration-decision"
+    ]
+  },
+  {
+    "id": "q023",
+    "query": "What metrics collection tool is used?",
+    "gold_note_ids": [
+      "metrics-collection-decision"
+    ]
+  },
+  {
+    "id": "q024",
+    "query": "How are distributed requests traced across services?",
+    "gold_note_ids": [
+      "distributed-tracing-decision"
+    ]
+  },
+  {
+    "id": "q025",
+    "query": "Which services handle authentication and authorization?",
+    "gold_note_ids": [
+      "auth-service",
+      "identity-platform"
+    ]
+  },
+  {
+    "id": "q026",
+    "query": "What is the relationship between the API Gateway and rate limiting?",
+    "gold_note_ids": [
+      "api-gateway",
+      "rate-limiting-decision"
+    ]
+  },
+  {
+    "id": "q027",
+    "query": "How do the Order and Product services stay synchronized?",
+    "gold_note_ids": [
+      "order-service",
+      "product-service",
+      "inventory-sync-decision",
+      "event-driven-architecture"
+    ]
+  },
+  {
+    "id": "q028",
+    "query": "What are the data validation and logging approaches used together?",
+    "gold_note_ids": [
+      "data-validation-concept",
+      "structured-logging-concept"
+    ]
+  },
+  {
+    "id": "q029",
+    "query": "How does the notification system support multiple channels?",
+    "gold_note_ids": [
+      "notification-service",
+      "template-engine-decision"
+    ]
+  },
+  {
+    "id": "q030",
+    "query": "What infrastructure components support payment processing?",
+    "gold_note_ids": [
+      "payment-service",
+      "stripe-integration",
+      "payment-infrastructure"
+    ]
+  },
+  {
+    "id": "q031",
+    "query": "How is the system monitored for performance and issues?",
+    "gold_note_ids": [
+      "observability-platform",
+      "metrics-collection-decision",
+      "distributed-tracing-decision",
+      "logging-infrastructure"
+    ]
+  },
+  {
+    "id": "q032",
+    "query": "What is the authentication flow from API Gateway to Auth Service?",
+    "gold_note_ids": [
+      "api-gateway",
+      "auth-service",
+      "jwt-token-strategy"
+    ]
+  },
+  {
+    "id": "q033",
+    "query": "How do search and recommendation systems work together?",
+    "gold_note_ids": [
+      "search-service",
+      "recommendation-engine",
+      "elasticsearch-infrastructure"
+    ]
+  },
+  {
+    "id": "q034",
+    "query": "What are the main components of the discovery platform?",
+    "gold_note_ids": [
+      "discovery-platform",
+      "search-service",
+      "recommendation-engine",
+      "user-behavior-tracking"
+    ]
+  },
+  {
+    "id": "q035",
+    "query": "How is user data minimized while tracking behavior?",
+    "gold_note_ids": [
+      "user-behavior-tracking",
+      "privacy-policy-decision"
+    ]
+  },
+  {
+    "id": "q036",
+    "query": "What infrastructure layers support the e-commerce platform?",
+    "gold_note_ids": [
+      "ecommerce-platform",
+      "backend-infrastructure",
+      "data-layer",
+      "payment-infrastructure"
+    ]
+  },
+  {
+    "id": "q037",
+    "query": "How is security maintained across the authentication and API layers?",
+    "gold_note_ids": [
+      "security-hardening",
+      "authentication-architecture",
+      "api-gateway"
+    ]
+  },
+  {
+    "id": "q038",
+    "query": "What is the end-to-end flow for payment processing with retries?",
+    "gold_note_ids": [
+      "payment-service",
+      "stripe-integration",
+      "payment-retry-decision"
+    ]
+  },
+  {
+    "id": "q039",
+    "query": "How do the web and mobile apps interact with the backend services?",
+    "gold_note_ids": [
+      "web-app-workstream",
+      "mobile-app-workstream",
+      "api-gateway",
+      "api-management"
+    ]
+  }
+]
