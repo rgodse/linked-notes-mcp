@@ -30,6 +30,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
 ]
+eval = ["litellm>=1.0.0", "dspy-ai>=2.5"]
 
 [project.scripts]
 linked-notes-mcp = "linked_notes_mcp.server:main"
